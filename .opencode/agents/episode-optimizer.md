@@ -28,7 +28,7 @@ permissions:
 ## 读取
 
 1. 读取 `work/meta/paragraphs.txt`，按 `work/preflight/report.json` 中本集的 `start_paragraph` 与 `end_paragraph_exclusive` 取出本集原始段落。
-2. 读取 `work/preflight/report.json`，找到任务集号对应的 `must_fix`、`suspected`、`scene_unify` 条目。
+2. 读取 `work/preflight/report.json`，找到任务集号对应的 `must_fix`、`suspected`、`scene_unify`、`culture_issues` 与 `culture_notes` 条目。
 3. 读取 `标准格式执行标准与示例.md`（格式标准与行类型定义）。
 
 ## 允许修改
@@ -41,6 +41,7 @@ permissions:
 - 适度丰富动作执行：在原有 `△` 原子内部把动作写充分——补足动作过程（起势 → 发力 / 接触 → 结果的必要环节）、补动作之间的自然衔接、补必要时环境与材质对动作的反馈（脚步、衣料、门、雨、玻璃、金属等已有质感）。
 - 丰富动作的边界：只把源文已写的动作写具体、写连贯；不新增事件、不改变任何动作的顺序、参与者和结果；不新增剧情事实、人物关系结论、能力、伤势、道具功能；不写镜头块、不写景别/运镜/机位/镜头术语；不系统扩写表演层次（微表情状态机、表演弧等留给炼本阶段），仅允许对源文已有的神态、表情、动作细节做具体化；单集总字数增幅建议不超过原集的 1 倍。
 - **文化背景锁定**：SOURCE 未建立的国家/地区、朝代、建筑、服饰、器物、称谓、礼仪、节庆、饮食、货币、文字等一律不得添加；不得从“夹/端/递”等中文动词反推筷子、筷架等器物；环境与材质反馈只能用 SOURCE 已有或文化中性的细节。
+- **文化问题处理**：`culture_issues` / `culture_notes` 中 `severity=must_fix` 或 `suspected` 且 `fixable=true` 的项，按建议改为文化中性写法（如“分菜/放进碟中/收回手”，不命名新器物）；`severity=info` 只报告不改；`fixable=false` 的台词/锁行不得修改，只在 `epNN.json` 记录“需人工修改源稿”。不得用另一种文化符号替换原符号。
 
 ### B. 格式标准化（格式层）
 
@@ -80,7 +81,7 @@ permissions:
   "enriched": 0,
   "atom_merge": 0,
   "items": [
-    {"type": "must_fix|suspected|scene_unify|enrich|atom_merge", "problem": "问题或位置", "action": "处理说明"}
+    {"type": "must_fix|suspected|scene_unify|enrich|atom_merge|culture_issue", "problem": "问题或位置", "action": "处理说明"}
   ]
 }
 ```

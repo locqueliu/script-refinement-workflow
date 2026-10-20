@@ -30,6 +30,7 @@ permissions:
 1. 完整读取 `work/meta/paragraphs.txt`；这是从源 docx 原样抽取的段落清单。
 2. 读取 `标准格式执行标准与示例.md`，仅用于识别结构缺漏和格式风险。
 3. 如存在 `work/preflight/report.json` 或 `work/preflight/report.md`，先视为旧报告，重新审查并覆盖，不沿用旧结论。
+4. 如存在根目录 `culture-profile.json`，读取其 `market`、`setting`、`forbid_cn_elements`、`allowed_terms`，用于文化背景审查。
 
 ## 审查顺序
 
@@ -62,6 +63,17 @@ permissions:
 
 无法定位到集/场时，明确写“前置信息/全局”，不得编造集号或场号。
 
+### 三·补、文化背景与中式元素审查
+
+本项与确定性脚本 `tools/preflight_culture_check.py` 分工：脚本负责词表扫描并写 `culture_issues`；你负责上下文判断，写 `culture_notes`。
+
+1. 读取根目录 `culture-profile.json`（若存在）的 `market`、`setting`、`forbid_cn_elements`、`allowed_terms`；缺失时按 `market=auto`、`forbid_cn_elements=false` 处理。
+2. 中文只是工作语言，不等于中国背景。不得因为剧本用中文书写、角色有中文名、台词是中文，就判断故事发生在中国。
+3. 只列真正与 SOURCE 已建立的国家/地区/时代冲突的中式元素，或 SOURCE 未建立却明显新增的中式设定；SOURCE 已有且符合设定的元素不得报错。
+4. 重点看：中式动作/礼仪、服饰、建筑/器物、场所、节庆/饮食、称谓/制度、文字/货币、配乐乐器，以及“夹→筷子”这类从中文动词反推器物的写法。
+5. 台词与锁行不得改；如问题位于台词，`fixable=false`，建议写“需人工修改源稿”。动作/环境描述可标 `fixable=true`，交给优化器中性化。
+6. `culture_notes` 只写上下文判断，不重复脚本已覆盖的逐词命中；每条包含 `ep`、`note`、`severity`（`must_fix`/`suspected`/`info`）、`fixable`、`suggestion`。无法确认时用 `suspected`，不得擅自判错。
+
 ### 四、有声台词字数门槛
 
 不要凭模型估算字数；由编排者随后运行 `tools/preflight_spoken_check.py` 做确定性统计。该项统计每集 VO、OS、对白及其他带说话人冒号的有声台词，但**只统计英文单词**：中文、数字、标点和说话人姓名不计，相邻中英双语台词只计英文行一次。每集必须在 150—300 个英文单词之间；低于 150 或高于 300 的集标记为 `FAIL`，写入报告的 `spoken_word_check` 与 `entry_gate`，不得把失败集描述为合格。
@@ -72,7 +84,7 @@ permissions:
 
 只写以下两个文件，不得修改源文、格式样本或其他项目文件：
 
-1. `work/preflight/report.md`：给人看的完整报告，包含审查范围、必须修改、疑似问题、场景统一、评级、最需处理的 3—5 项，以及“继续/暂停”操作说明。暂停时的方案只写基础错误修正和进入炼本前的处理建议，不写节奏、爽点或商业优化。
+1. `work/preflight/report.md`：给人看的完整报告，包含审查范围、必须修改、疑似问题、场景统一、评级、最需处理的 3—5 项、文化背景审查，以及“继续/暂停”操作说明。暂停时的方案只写基础错误修正和进入炼本前的处理建议，不写节奏、爽点或商业优化。
 2. `work/preflight/report.json`：合法 JSON，结构至少包含：
 
 ```json
@@ -85,6 +97,10 @@ permissions:
   "scene_unify": [],
   "top_actions": [],
   "spoken_word_check": {"status": "PENDING", "failed_eps": [], "results": []},
+  "culture_notes": [
+    {"ep": 1, "note": "上下文判断说明", "severity": "suspected", "fixable": true, "suggestion": "改为文化中性写法"}
+  ],
+  "culture_issues": [],
   "episodes": [
     {"ep": 1, "title": "原集标题", "start_paragraph": 12, "end_paragraph_exclusive": 80}
   ]

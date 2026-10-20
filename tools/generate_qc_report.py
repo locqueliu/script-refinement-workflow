@@ -81,7 +81,8 @@ def cell(s):
     return str(s).replace("|", "｜").replace("\n", " ").strip()
 
 
-def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None):
+def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, culture=None):
+    culture = culture or []
     lines = [f"# 《{stem}》质检报告", "",
              f"- 生成时间：{datetime.datetime.now().isoformat(timespec='seconds')}",
              f"- 集数：{len(eps)}", ""]
@@ -98,6 +99,9 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None):
     atoms_after = (pacing or {}).get("after", {}) or {}
     risk_eps = [n for n in eps if (ap_res.get(n) or {}).get("status") == "RISK"]
     dlg_eps = [n for n in eps if (dd_res.get(n) or {}).get("dialogue_status") == "RISK"]
+    culture_must = [r for r in culture if isinstance(r, dict) and r.get("severity") == "must_fix"]
+    culture_sus = [r for r in culture if isinstance(r, dict) and r.get("severity") == "suspected"]
+    culture_eps = sorted({int(r["ep"]) for r in culture if isinstance(r, dict) and "ep" in r})
 
     lines += ["## 总览", "", "| 项目 | 结果 |", "|---|---|"]
     if fix_eps:
@@ -111,6 +115,10 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None):
     else:
         lines.append("| △ 原子合并（用户授权，内容保真） | 无 |")
     lines.append(f"| △/对白密度检测（信息项，不阻断） | △ 过多 {len(risk_eps)} 集；对白过密/动作不足 {len(dlg_eps)} 集（明细见第四节）|")
+    if culture:
+        lines.append(f"| 文化背景审查（信息项，SOURCE 唯一依据） | must_fix {len(culture_must)} 项；suspected {len(culture_sus)} 项；涉及 {len(culture_eps)} 集（明细见第五节）|")
+    else:
+        lines.append("| 文化背景审查（信息项，SOURCE 唯一依据） | 未执行或未命中 |")
     if pre_fail:
         lines.append(f"| 前置阶段台词变动（源稿→优化存档） | 有：{'、'.join(f'EP{n:02d}' for n in pre_fail)} |")
     else:
@@ -224,7 +232,36 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None):
                 mrows.append(f"| EP{n:02d} | {cell(it.get('type', ''))} | {cell(it.get('problem', ''))} | {cell(it.get('action', ''))} |")
         lines += ["| 集 | 类型 | 位置/涉及原子 | 处理 |", "|---|---|---|---|", *mrows, ""]
 
-    lines += ["## 五、结论", ""]
+    lines += ["## 五、文化背景审查", "",
+              "说明：本项由 `tools/preflight_culture_check.py` 扫描 SOURCE 生成，目标文化由 `culture-profile.json` 控制。",
+              "- `must_fix`：与既定文化背景冲突的高置信中式元素；动作行可交优化器中性化，台词/锁行只报告。",
+              "- `suspected`：歧义或上下文不足，交人工判断。",
+              "- `info`：`forbid_cn_elements=false` 时的报告项，不阻断。", ""]
+    if culture:
+        lines += ["| 集 | 段落 | 类型 | 命中词 | 级别 | 可自动修复 | 上下文 / 建议 |",
+                  "|---|---:|---|---|---|---|---|"]
+        for r in culture:
+            if not isinstance(r, dict):
+                continue
+            lines.append(
+                f"| EP{int(r.get('ep', 0)):02d} | {r.get('paragraph', '—')} | {cell(r.get('kind', ''))} | "
+                f"{cell(r.get('term', ''))} | {cell(r.get('severity', ''))} | {'是' if r.get('fixable') else '否'} | "
+                f"{cell(r.get('context', ''))} / {cell(r.get('suggestion', ''))} |"
+            )
+        lines.append("")
+    else:
+        lines += ["未执行文化背景检查，或未发现中式元素。", ""]
+
+    culture_fix_eps = [n for n in eps if per_ep[n].get("culture")]
+    if culture_fix_eps:
+        lines += ["### 优化器文化问题处理记录", "",
+                  "| 集 | 位置/问题 | 处理 |", "|---|---|---|"]
+        for n in culture_fix_eps:
+            for it in per_ep[n]["culture"]:
+                lines.append(f"| EP{n:02d} | {cell(it.get('problem', ''))} | {cell(it.get('action', ''))} |")
+        lines.append("")
+
+    lines += ["## 六、结论", ""]
     if not fix_eps and not pre_fail and not post_fail:
         lines.append("- 剧情：无较大剧情修改，仅动作丰富与格式整理。")
     elif fix_eps:
@@ -237,6 +274,10 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None):
         lines.append(f"- 密度检测：△ 过多命中 {len(risk_eps)} 集、对白过密/动作不足命中 {len(dlg_eps)} 集（信息项）；其中 {len(merge_eps)} 集已按用户授权合并连续 △。")
     else:
         lines.append("- 密度检测：未检测到 △/对白密度风险。")
+    if culture_must or culture_sus:
+        lines.append(f"- 文化背景：must_fix {len(culture_must)} 项、suspected {len(culture_sus)} 项；动作行已交优化器中性化，台词/锁行需人工复核（详见第五节）。")
+    else:
+        lines.append("- 文化背景：未检测到需处理的中式元素。")
     if pre_fail or post_fail:
         lines.append(f"- 台词：检测到变动集（前置：{pre_fail or '无'}；炼本：{post_fail or '无'}），请人工复核对应明细。")
     else:
@@ -350,6 +391,7 @@ def main() -> int:
             "unify": [i for i in items if i.get("type") == "scene_unify"],
             "enrich": [i for i in items if i.get("type") == "enrich"],
             "merge": [i for i in items if i.get("type") == "atom_merge"],
+            "culture": [i for i in items if i.get("type") == "culture_issue"],
         }
 
     paras_path = root / "work" / "meta" / "paragraphs.txt"
@@ -385,8 +427,10 @@ def main() -> int:
         atoms_after[n] = (sum(1 for x in C.read_text(sp).splitlines() if C.normalize_line(x).startswith("△"))
                           if sp.exists() else None)
     pacing = {"atom": ap_res, "dialogue": dd_res, "before": atoms_before, "after": atoms_after}
+    culture_data = C.load_json(root / "work" / "preflight" / "culture.json", {}) or {}
+    culture = culture_data.get("results", []) or []
 
-    md = build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing)
+    md = build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing, culture)
     out_dir = Path(args.out_dir) if args.out_dir else (root / "output")
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / f"{stem}_质检报告.md"
