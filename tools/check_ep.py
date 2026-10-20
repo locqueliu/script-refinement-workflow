@@ -11,11 +11,12 @@ import common as C
 BANNED_PATTERNS = ["BGM", "bgm", "配乐", "背景音乐", "音乐", "字幕", "画面文字", "屏幕文字", "标题卡", "大字标题", "文字浮现", "浮现文字"]
 FUZZY_WORDS = ["自行发挥", "自行补充", "同上"]
 MAX_DRAFT_CJK = 10000
-# 硬失败：只保留内容损坏类（缺稿、台词缺失/错位/新增、双语错位、英文标签错误、超字数）。
+# 硬失败：只保留内容损坏类（缺稿、台词缺失/错位/新增、双语错位、英文标签错误、超字数、文化背景新增）。
 # thin/label_added/label_changed/scene_as_speech 降为 fmt: warn，动作丰富后的正常格式扩展不再打回。
 BASIC_FAIL_PREFIXES = ("too_long:", "no_draft_file", "missing_in_docx", "empty_draft",
                        "missing_dialogue:", "bilingual_desync:", "spoken_order:",
-                       "en_label_language:", "en_label_missing:", "added_spoken:")
+                       "en_label_language:", "en_label_missing:", "added_spoken:",
+                       "culture_added:")
 SHOT_BLOCK_RE = re.compile(r"^【.+】$")
 BLOCKING_RE = re.compile(r"^【人物站位")
 SKIP_BLOCK_PREFIX = ("【人物站位", "【音效", "【制作", "【全局")
@@ -35,6 +36,7 @@ def extra_checks(src_text, draft_text):
         sc = src_text.count(pat)
         if dc > sc:
             fails.append(f"fuzzy_word:{pat}:{dc - sc}")
+    fails.extend(C.culture_added_errors(src_text, draft_text))
     if "SPECTACLE" not in draft_text:
         fails.append("no_spectacle")
     src_cjk = C.cjk_count(src_text)

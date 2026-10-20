@@ -33,6 +33,36 @@ def save_json(path, obj):
 
 
 # ---------------------------------------------------------------------------
+# 文化背景硬锁：SOURCE 未出现的中国/东方文化符号，不得由富化阶段新增。
+# 该表是确定性安全网，只覆盖高置信度词；语义判断仍以 director/optimizer 规则为准。
+# ---------------------------------------------------------------------------
+CULTURE_TERMS = (
+    "筷子", "筷架", "一筷之礼", "筷礼",
+    "拱手", "作揖", "跪拜", "拂袖", "抱拳",
+    "旗袍", "长衫", "汉服", "唐装", "绣花鞋",
+    "青砖", "瓦檐", "纸窗", "灯笼", "屏风", "太师椅",
+    "客栈", "茶楼", "衙门", "祠堂", "四合院",
+    "春节", "中秋", "饺子", "茶道",
+    "皇上", "王爷", "银两", "铜钱",
+    "古筝", "琵琶", "二胡", "古琴", "笛子", "唢呐", "京剧",
+    "家主", "老爷", "师父", "师兄",
+)
+
+
+def culture_added_errors(src_text, draft_text):
+    """Return terms present in draft but absent from source (source-aware check)."""
+    src = src_text or ""
+    draft = draft_text or ""
+    errors = []
+    if "筷" in draft and "筷" not in src:
+        errors.append("culture_added:筷")
+    for term in CULTURE_TERMS:
+        if term in draft and term not in src:
+            errors.append(f"culture_added:{term}")
+    return errors
+
+
+# ---------------------------------------------------------------------------
 # Format profile: 由 tools/assemble_source.py 依据标准格式自动生成 work/meta/format.json。
 # 文件缺失时回退到内置默认（保证不整体崩溃）。
 # ---------------------------------------------------------------------------

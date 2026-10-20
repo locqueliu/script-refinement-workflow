@@ -209,6 +209,8 @@ def main() -> int:
             return 2
         items = []
         errors = []
+        paras_path = root / "work" / "meta" / "paragraphs.txt"
+        paragraphs = C.read_text(paras_path).splitlines() if paras_path.exists() else []
         for item in sorted(report_eps, key=lambda x: int(x["ep"])):
             n = int(item["ep"])
             out = opt_dir / f"ep{n:02d}.md"
@@ -223,9 +225,16 @@ def main() -> int:
             if C.episode_number(lines[0]) != n:
                 errors.append(f"ep{n:02d}: first line is not its episode header")
                 continue
+            start = int(item.get("start_paragraph", -1))
+            end = int(item.get("end_paragraph_exclusive", -1))
+            if paragraphs and 0 <= start < end <= len(paragraphs):
+                culture = C.culture_added_errors("\n".join(paragraphs[start:end]), "\n".join(lines))
+                if culture:
+                    errors.append(f"ep{n:02d}: " + ", ".join(culture))
+                    continue
             items.append({"ep": n, "lines": lines, "path": out,
-                          "para_start": int(item.get("start_paragraph", -1)),
-                          "para_end": int(item.get("end_paragraph_exclusive", -1))})
+                          "para_start": start,
+                          "para_end": end})
         if errors:
             print("[FAIL] 优化产物校验未通过：\n- " + "\n- ".join(errors))
             return 1
