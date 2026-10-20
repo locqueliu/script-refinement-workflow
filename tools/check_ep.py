@@ -134,7 +134,9 @@ def main():
         if demoted:
             warns = warns + ["fmt:" + d for d in demoted]
         # --allow-issue-pass：重试超限降级，把硬失败转为 passed-with-issues
-        if args.allow_issue_pass and fails:
+        # 文化背景硬锁不可降级：culture_added 必须保持 FAIL，避免“降级通过”绕过文化锁。
+        culture_block = [f for f in fails if f.startswith("culture_added:")]
+        if args.allow_issue_pass and fails and not culture_block:
             verdict = "PASS"
             issue_lines = [f"# EP{n:02d} 校验未通过项（降级通过）\n",
                            f"生成时间：{datetime.datetime.now().isoformat(timespec='seconds')}\n",
@@ -153,6 +155,8 @@ def main():
         else:
             verdict = "PASS" if not fails else "FAIL"
             issue_status = None
+            if culture_block:
+                warns = warns + ["culture_block:" + f for f in culture_block]
         if fails:
             overall_fail += 1
         rec = {"ep": n, "verdict": verdict, "fails": fails, "warns": warns, "stats": stats, "mode": mode}
