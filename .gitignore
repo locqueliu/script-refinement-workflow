@@ -1,0 +1,20 @@
+# 运行产物
+work/
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Node
+.opencode/node_modules/
+
+# 源剧本与临时文件（避免把客户剧本上传）
+剧本输入/*.docx
+剧本输入/~$*
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
