@@ -79,9 +79,13 @@ def episode_task(n, args):
         C.write_text(C.ROOT / "work" / "meta" / f"retry_ep{n:02d}.txt",
                      f"ep{n:02d} attempt {attempt} failed checks:\n{fails}\n")
         print(f"[retry] ep{n:02d} attempt={attempt} exit={code} {secs}s fails={ascii_safe(fails)[:120]}", flush=True)
-    # 重试超限：降级为 passed-with-issues，写说明文件
-    print(f"[issue-pass] ep{n:02d} exceeded retries — forcing passed-with-issues", flush=True)
+    # 重试超限：尝试降级为 passed-with-issues；文化背景硬锁不可降级
+    print(f"[issue-pass] ep{n:02d} exceeded retries — attempting issue-pass", flush=True)
     issue_rec = force_issue_pass(n)
+    if issue_rec.get("verdict") == "FAIL":
+        print(f"[culture-block] ep{n:02d} culture lock cannot be issue-passed", flush=True)
+        return {"ep": n, "result": "failed", "attempt": args.retries + 1,
+                "fails": issue_rec.get("fails", fails)}
     return {"ep": n, "result": "passed-with-issues", "attempt": args.retries + 1,
             "fails": fails, "issue_file": f"work/report/ep{n:02d}_issue.md"}
 
