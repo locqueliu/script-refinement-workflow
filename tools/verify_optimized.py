@@ -66,7 +66,10 @@ def main():
             continue
         src = [(canon(p), canon(t)) for p, t in dialogue_lines(paras[start:end])]
         out = [(canon(p), canon(t)) for p, t in dialogue_lines(out_path.read_text(encoding="utf-8-sig").splitlines())]
-        if src == out:
+        src_raw = "\n".join(paras[start:end])
+        out_raw = out_path.read_text(encoding="utf-8-sig")
+        culture = C.culture_added_errors(src_raw, out_raw)
+        if src == out and not culture:
             results.append({"ep": n, "status": "PASS", "dialogue_lines": len(src)})
         else:
             detail = f"dialogue lines differ: src={len(src)} out={len(out)}"
@@ -74,6 +77,8 @@ def main():
                 if src[i] != out[i]:
                     detail += f" | first diff #{i + 1}: src={src[i][0]}：{src[i][1][:40]} / out={out[i][0]}：{out[i][1][:40]}"
                     break
+            if culture:
+                detail += " | " + ", ".join(culture)
             results.append({"ep": n, "status": "FAIL", "detail": detail})
             failed.append(n)
     out = Path(args.out) if args.out else (root / "work" / "report" / "verify_optimized.json")
