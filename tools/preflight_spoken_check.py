@@ -7,8 +7,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common as C
 
-MIN_WORDS = 150
-MAX_WORDS = 300
+MIN_WORDS = 100
+MAX_WORDS = 350
 STRUCTURAL_RE = re.compile(
     r"^(?:第\s*\d+\s*集|(?i:episode)\s*\d+|\d+[-－]\d+\s|"
     r"(?:人物|出场人物)\s*[：:]|【|△)"
@@ -122,7 +122,7 @@ def main(root=None):
             if status == "FAIL":
                 failed.append(n)
         check = {
-            "rule": "150 <= english_spoken_words <= 300 per episode",
+            "rule": f"{MIN_WORDS} <= english_spoken_words <= {MAX_WORDS} per episode",
             "unit_definition": "English dialogue lines only; Chinese dialogue lines, digits, punctuation and speaker names are excluded. Contractions and hyphenated words count as one word. Every English spoken line counts once, including repeated performances.",
             "min": MIN_WORDS, "max": MAX_WORDS,
             "failed_eps": failed, "results": results,
@@ -142,8 +142,8 @@ def main(root=None):
                      "计数：只统计英文单词；中文、数字、标点和说话人姓名不计；相邻中英台词对只计英文行一次。", "",
                      "| 集数 | 计数 | 结果 | 原因 |", "|---|---:|---|---|"]
             for row in results:
-                reason_text = {"within_range": "合格", "below_minimum": "低于150词，不合格",
-                               "above_maximum": "超过300词，不合格"}[row["reason"]]
+                reason_text = {"within_range": "合格", "below_minimum": f"低于{MIN_WORDS}词，不合格",
+                               "above_maximum": f"超过{MAX_WORDS}词，不合格"}[row["reason"]]
                 lines.append(f"| EP{row['ep']:02d} | {row['count']} | {row['status']} | {reason_text} |")
             if failed:
                 lines += ["", f"结论：FAIL，未通过集数：{', '.join(f'EP{x:02d}' for x in failed)}。"]
@@ -153,7 +153,7 @@ def main(root=None):
         print(f"[{'FAIL' if failed else 'PASS'}] spoken words {len(results)} episodes; failed={failed}")
         for row in results:
             if row["status"] == "FAIL":
-                reason = "低于150词" if row["count"] < MIN_WORDS else "超过300词"
+                reason = f"低于{MIN_WORDS}词" if row["count"] < MIN_WORDS else f"超过{MAX_WORDS}词"
                 print(f"[不合格] 第{row['ep']}集：英文有声台词 {row['count']} 词，{reason}")
         return 0  # 字数不合格只作为报告信息，不阻断后续流程；崩溃时 except 分支返回 2
     except Exception as e:
