@@ -481,6 +481,8 @@ def prepare_source_lines(texts):
 
 def detect_tag(s):
     # Canonical values are the source-language labels used by the checker.
+    if re.search(r"[（(]\s*O\.S\.(?=[，,、：:）)\s]|$)", s, re.I):
+        return "OS"
     for tag in speaker_labels():
         if re.search(r"[（(]" + re.escape(tag) + r"(?:[，,、：:）)]|\s|$)", s):
             return {"对白": "对白", "VO": "VO", "OS": "OS"}.get(tag, tag)
@@ -493,6 +495,8 @@ def detect_tag(s):
 
 def raw_label(prefix):
     """Return the label exactly as written in the source prefix, or ''."""
+    if re.search(r"[（(]\s*O\.S\.(?=[，,、：:）)\s]|$)", prefix, re.I):
+        return "O.S."
     for lab in ("对白", "VO", "OS"):
         if re.search(r"[（(]\s*" + re.escape(lab) + r"(?=[，,、：:）)\s]|$)", prefix):
             return lab
@@ -503,7 +507,11 @@ def raw_label(prefix):
 
 
 def canonical_label(raw):
-    return "对白" if raw in ("对白", "DIALOGUE", "DIALOG") else (raw or "")
+    if raw in ("对白", "DIALOGUE", "DIALOG"):
+        return "对白"
+    if raw == "O.S.":
+        return "OS"
+    return raw or ""
 
 
 def canon_dialogue_text(s):
@@ -517,11 +525,14 @@ def dialogue_hash(s):
 
 
 META_PREFIXES = ("镜头", "转场", "插入帧", "片长", "时长", "时间", "地点", "场景",
-                 "备注", "说明", "注", "字幕", "集数", "剧名", "题材", "关键词")
+                 "备注", "说明", "注", "字幕", "集数", "剧名", "题材", "关键词",
+                 "空间起点", "画面范围", "画外锁定", "声音设计", "声音", "禁止",
+                 "硬性禁止", "画面", "姿态", "位置", "分镜", "本分镜", "高光",
+                 "环境", "人物", "出场人物", "空间")
 
 
-def parse_dialogue_line(line):
-    """Parse one source/output line as a dialogue record, labelled or not."""
+def parse_storyboard_dialogue(line):
+    """Parse a source or storyboard line as dialogue, excluding layout fields."""
     s = normalize_line(line)
     if not s or s.startswith("△"):
         return None
@@ -539,7 +550,10 @@ def parse_dialogue_line(line):
     prefix, body = sp
     if re.match(r"^[\d\s.、\-－]+$", prefix):
         return None
-    if prefix in META_PREFIXES or any(prefix.startswith(p) for p in META_PREFIXES):
+    if any(prefix.startswith(p) for p in META_PREFIXES):
+        return None
+    # Camera prose often ends with a sentence before its colon; it is not a speaker.
+    if len(prefix) > 24 or re.search(r"[。！？；，,;!?]", prefix):
         return None
     speaker = re.split(r"[（(]", prefix, 1)[0].strip().strip("[]【】").strip()
     if not speaker:
@@ -559,6 +573,10 @@ def parse_dialogue_line(line):
         "hash": dialogue_hash(body),
         "lang": spoken_lang(s) or "",
     }
+
+
+def parse_dialogue_line(line):
+    return parse_storyboard_dialogue(line)
 
 
 def is_latin_dominant(s):
