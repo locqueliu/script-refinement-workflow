@@ -55,8 +55,9 @@ def split_colon(line):
 
 
 def is_spoken(line):
-    pair = split_colon(line)
-    return bool(pair and TAG_RE.search(pair[0]))
+    # Count any speaker line (tag optional); metadata/atoms/scenes are excluded
+    # by the shared parser, so untagged scripts no longer report 0 dialogue.
+    return C.parse_dialogue_line(line) is not None
 
 
 def jaccard(a, b):

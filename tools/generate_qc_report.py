@@ -81,8 +81,17 @@ def cell(s):
     return str(s).replace("|", "｜").replace("\n", " ").strip()
 
 
-def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, culture=None):
+def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, culture=None,
+                   dialogue_audit=None):
     culture = culture or []
+    da = dialogue_audit or {}
+    da_totals = da.get("totals") or {}
+    da_rows = da.get("rows") or []
+    da_summary = da.get("summary") or []
+    da_fails = int(da_totals.get("fails") or 0)
+    da_confirm = int(da_totals.get("confirm") or 0)
+    da_auto = int(da_totals.get("auto_labeled") or 0)
+    da_available = bool(da)
     lines = [f"# 《{stem}》质检报告", "",
              f"- 生成时间：{datetime.datetime.now().isoformat(timespec='seconds')}",
              f"- 集数：{len(eps)}", ""]
@@ -129,6 +138,10 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
         lines.append(f"| 炼本阶段台词变动（优化存档→导演执行稿） | 有：{'、'.join(f'EP{n:02d}' for n in post_fail)} |")
     else:
         lines.append("| 炼本阶段台词变动（优化存档→导演执行稿） | 无变动 |")
+    if da_available:
+        lines.append(f"| 台词逐句核对（原文 vs 成品，含无标签句） | 失败 {da_fails} 行；补标-需确认 {da_confirm} 行；自动补标（对白）{da_auto} 行（明细见第六节）|")
+    else:
+        lines.append("| 台词逐句核对（原文 vs 成品，含无标签句） | 未执行 |")
     over_eps = [n for n in eps if words.get(n, {}).get("over")]
     if not has_draft:
         lines.append(f"| 炼本单集字数（上限 {MAX_DRAFT_CJK} 字） | 未执行炼本 |")
@@ -261,7 +274,51 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
                 lines.append(f"| EP{n:02d} | {cell(it.get('problem', ''))} | {cell(it.get('action', ''))} |")
         lines.append("")
 
-    lines += ["## 六、结论", ""]
+    lines += ["## 六、台词逐句核对（原文 vs 成品）", "",
+              "说明：台账在 `/前置检查` 抽取时从原始 docx 冻结，覆盖全部台词（含无标签句）。",
+              "- 正文实义改动、显式标签改动/丢失、说话人改动、漏句/多句 = **失败**；",
+              "- 源无标签、成品补「对白」= 自动放行；补 `VO/OS` = 需确认（只报告、不阻断）；",
+              "- 仅空格/引号/全半角差异 = 格式差异；合规长句拆分 = 拆分-允许。", ""]
+    if not da_available:
+        lines += ["未执行台词逐句核对（旧项目或未运行 `tools/audit_dialogue.py`）。", ""]
+    else:
+        src_meta = da.get("source") or {}
+        lines += [
+            f"- 台账：{src_meta.get('dialogue_lines', '?')} 句"
+            f"（有标签 {src_meta.get('tagged', '?')}｜无标签 {src_meta.get('untagged', '?')}）",
+            f"- 对账行数：{da_totals.get('rows', '?')}｜失败：{da_fails}｜"
+            f"补标-需确认：{da_confirm}｜自动补标（对白）：{da_auto}｜"
+            f"合规拆分：{da_totals.get('split', 0)}",
+            f"- 结论：{'PASS' if da_fails == 0 else 'FAIL'}",
+            "",
+            "| 集 | 行数 | OK | 补标-对白 | 补标-需确认 | 格式差异 | 失败 |",
+            "|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+        for s in da_summary:
+            lines.append(f"| {s.get('ep', '')} | {s.get('rows', 0)} | {s.get('ok', 0)} | "
+                         f"{s.get('labeled', 0)} | {s.get('confirm', 0)} | {s.get('format', 0)} | "
+                         f"{s.get('fails', 0)} |")
+        lines.append("")
+        detail = [r for r in da_rows
+                  if r.get("状态") not in ("OK", "补标-对白", "拆分-允许")]
+        lines += [f"### 需关注明细（{len(detail)} 行）", ""]
+        if detail:
+            lines += ["| 集 | 序号 | 原文 | 成品 | 状态 | 说明 |",
+                      "|---:|---:|---|---|---|---|"]
+            for r in detail[:200]:
+                lines.append(
+                    f"| {r.get('集', '')} | {r.get('序号', '')} | {cell(r.get('原文台词', ''))} | "
+                    f"{cell(r.get('成品台词', ''))} | {cell(r.get('状态', ''))} | {cell(r.get('说明', ''))} |")
+            if len(detail) > 200:
+                lines.append("")
+                lines.append(f"> 仅列前 200 行；完整数据见 `work/report/dialogue_audit.json`。")
+        else:
+            lines.append("无。")
+        lines.append("")
+        lines.append("> 全量逐句（含 OK 行）见 `work/report/dialogue_audit.json`。")
+        lines.append("")
+
+    lines += ["## 七、结论", ""]
     if not fix_eps and not pre_fail and not post_fail:
         lines.append("- 剧情：无较大剧情修改，仅动作丰富与格式整理。")
     elif fix_eps:
@@ -279,9 +336,16 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
     else:
         lines.append("- 文化背景：未检测到需处理的中式元素。")
     if pre_fail or post_fail:
-        lines.append(f"- 台词：检测到变动集（前置：{pre_fail or '无'}；炼本：{post_fail or '无'}），请人工复核对应明细。")
+        lines.append(f"- 台词锁定校验（有标签行）：检测到变动集（前置：{pre_fail or '无'}；炼本：{post_fail or '无'}），请人工复核对应明细。")
     else:
-        lines.append("- 台词：全部阶段逐字锁定，无变动。")
+        lines.append("- 台词锁定校验（有标签行）：全部通过；无标签句与标签改动以第六节逐句核对为准。")
+    if da_available:
+        if da_fails:
+            lines.append(f"- 台词逐句核对：{da_fails} 行失败（详见第六节）；补标-需确认 {da_confirm} 行。")
+        else:
+            lines.append(f"- 台词逐句核对：原文台词逐字一致，显式标签无未授权改动；补标-需确认 {da_confirm} 行。")
+    else:
+        lines.append("- 台词逐句核对：未执行。")
     if has_draft:
         if over_eps:
             lines.append(f"- 字数：{'、'.join(f'EP{n:02d}' for n in over_eps)} 超出单集上限 {MAX_DRAFT_CJK} 字，请核查。")
@@ -429,8 +493,9 @@ def main() -> int:
     pacing = {"atom": ap_res, "dialogue": dd_res, "before": atoms_before, "after": atoms_after}
     culture_data = C.load_json(root / "work" / "preflight" / "culture.json", {}) or {}
     culture = culture_data.get("results", []) or []
+    dialogue_audit = C.load_json(root / "work" / "report" / "dialogue_audit.json", {}) or {}
 
-    md = build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing, culture)
+    md = build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing, culture, dialogue_audit)
     out_dir = Path(args.out_dir) if args.out_dir else (root / "output")
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / f"{stem}_质检报告.md"
@@ -444,6 +509,12 @@ def main() -> int:
     over_eps = [n for n in eps if words[n]["over"]]
     print(f"[OK] 质检报告：{md_path}")
     print(f"[OK] 质检报告：{docx_path}")
+    da_totals = (dialogue_audit.get("totals") or {})
+    if dialogue_audit:
+        print(f"[OK] 台词逐句核对：失败={da_totals.get('fails', 0)}；"
+              f"需确认={da_totals.get('confirm', 0)}；自动补标={da_totals.get('auto_labeled', 0)}")
+    else:
+        print("[WARN] 未找到 work/report/dialogue_audit.json，质检报告将标注“未执行”")
     print(f"[OK] 逻辑修复集={fix_eps or '无'}；△合并集={merge_eps or '无'}；前置台词变动={pre_fail or '无'}；炼本台词变动={post_fail or '无'}；字数超标={over_eps or '无'}")
     return 0
 

@@ -63,6 +63,17 @@ def writeback_docx(root: Path, episodes: list, opt_dir: Path):
     replacements = []
     seen = set()
     manifest_eps = []
+    line_map = (C.load_json(root / "work" / "meta" / "line_map.json", {}) or {}).get("lines") or []
+
+    def line_to_para(i):
+        if not line_map:
+            return i
+        if i < 0:
+            return 0
+        if i >= len(line_map):
+            return len(px)
+        return int(line_map[i].get("para", i))
+
     for item in sorted(episodes, key=lambda x: int(x.get("start_paragraph", -1))):
         n = int(item["ep"])
         start = int(item["start_paragraph"])
@@ -70,16 +81,26 @@ def writeback_docx(root: Path, episodes: list, opt_dir: Path):
         if n in seen:
             raise ValueError(f"duplicate episode {n} in preflight report")
         seen.add(n)
-        if start < 0 or end <= start or end > len(px):
+        limit = len(line_map) if line_map else len(px)
+        if start < 0 or end <= start or end > limit:
             raise ValueError(f"invalid paragraph range for ep{n:02d}: {start}:{end}")
+        p_start = line_to_para(start)
+        p_end = line_to_para(end)
+        if p_end <= p_start:
+            p_end = min(len(px), p_start + 1)
+        if p_end > len(px):
+            raise ValueError(f"paragraph mapping out of range for ep{n:02d}: {p_start}:{p_end}")
+        if line_map and int(line_map[start].get("sub", 0)) > 0:
+            raise ValueError(
+                f"ep{n:02d} 的集标题与上一行同处一个 docx 段落，无法安全回写；请在源文件中让集标题独立成段")
         out_path = opt_dir / f"ep{n:02d}.md"
         if not out_path.exists():
             raise ValueError(f"missing optimized output: {out_path}")
         lines = read_ep_file(out_path)
         if C.episode_number(lines[0]) != n:
             raise ValueError(f"first line of optimized ep{n:02d} is not its episode header")
-        title_ppr, title_rpr = extract_templates(px[start])
-        body_ppr, body_rpr = C.find_body_templates(px, start, end, heading_ids)
+        title_ppr, title_rpr = extract_templates(px[p_start])
+        body_ppr, body_rpr = C.find_body_templates(px, p_start, p_end, heading_ids)
         parts = []
         for idx, line in enumerate(lines):
             if idx == 0:
@@ -87,8 +108,9 @@ def writeback_docx(root: Path, episodes: list, opt_dir: Path):
             else:
                 parts.append(make_paragraph(line, body_ppr, body_rpr))
         replacement = "".join(parts)
-        replacements.append((spans[start][0], spans[end - 1][1], replacement))
-        manifest_eps.append({"ep": n, "source_paragraphs": end - start,
+        replacements.append((spans[p_start][0], spans[p_end - 1][1], replacement))
+        manifest_eps.append({"ep": n, "source_paragraphs": p_end - p_start,
+                             "source_lines": end - start,
                              "optimized_paragraphs": len(lines),
                              "path": str(out_path)})
 

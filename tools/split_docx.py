@@ -13,7 +13,7 @@ import common as C
 def dump_raw(root, texts):
     meta = root / "work" / "meta"
     meta.mkdir(parents=True, exist_ok=True)
-    C.write_text(meta / "paragraphs.txt", "\n".join(texts).rstrip() + "\n")
+    C.write_text(meta / "paragraphs.txt", "\n".join(texts) + "\n")
     nonempty = [t for t in texts if t.strip()]
     head = nonempty[:160]
     starts = [i for i, t in enumerate(texts) if C.episode_number(t) is not None]
@@ -51,10 +51,24 @@ def main():
     with zipfile.ZipFile(docx) as z:
         xml = z.read("word/document.xml").decode("utf-8")
     px = C.extract_paragraph_xmls(xml)
-    texts = [C.paragraph_text(p) for p in px]
+    units = []
+    for pi, p in enumerate(px):
+        for si, line in enumerate(C.paragraph_text_lines(p)):
+            units.append({"text": line, "para": pi, "sub": si})
+    prepared, prep_stats = C.prepare_source_units(units)
+    texts = [u["text"] for u in prepared]
     (root / "work" / "meta").mkdir(parents=True, exist_ok=True)
+    C.save_json(root / "work" / "meta" / "line_map.json", {
+        "source": str(docx),
+        "paragraphs": len(px),
+        "lines": [{"line": i, "para": u["para"], "sub": u["sub"]}
+                  for i, u in enumerate(prepared)],
+        "stats": prep_stats,
+    })
     dump_raw(root, texts)
-    print(f"[OK] extracted paras={len(texts)} -> work/meta/{{paragraphs.txt,_format_sample.md}}")
+    print(f"[OK] extracted paras={len(texts)} (docx-p={len(px)}) -> work/meta/{{paragraphs.txt,_format_sample.md,line_map.json}}")
+    if any(prep_stats.values()):
+        print("[OK] normalized: " + ", ".join(f"{k}={v}" for k, v in prep_stats.items() if v))
     if args.extract_only:
         return 0
     eps = C.locate_episodes(texts)
@@ -105,6 +119,8 @@ def main():
         handoff[str(e["ep"])] = {"prev_tail": prev_tail, "next_head": next_head}
     C.save_json(meta_dir / "handoff.json", handoff)
     prologue = [t for t in texts[:eps[0][0]] if t.strip()]
+    prologue = [t for t in prologue
+                if not (re.match(r"^第\s*\d+\s*集\s*[：:]", t) and len(t) > 30)]
     C.write_text(meta_dir / "facts_lock.md",
                  "# 全局锁定事实（原文档前置信息）\n\n"
                  "> 仅用于跨集一致性核对：人物名、术语、道具、时间线以此为准；不得据此新增剧情事实，不得写入正文引用。\n\n"

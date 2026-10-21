@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import sys
@@ -123,6 +124,41 @@ def _safe_compile(pattern, fallback, what):
         return re.compile(fallback)
 
 
+CN_DIGITS = {
+    "零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+    "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+}
+
+
+def cn_number(text):
+    """Convert a simple Chinese numeral (一…一百九十九) to int; return None if invalid."""
+    s = (text or "").strip()
+    if not s:
+        return None
+    if s.isdigit():
+        return int(s)
+    if s == "十":
+        return 10
+    if "十" in s:
+        left, _, right = s.partition("十")
+        tens = CN_DIGITS.get(left, 1) if left else 1
+        ones = CN_DIGITS.get(right, 0) if right else 0
+        return tens * 10 + ones
+    if len(s) == 1:
+        return CN_DIGITS.get(s)
+    return None
+
+
+def _episode_tail_ok(s, tail):
+    if not tail:
+        return True
+    if re.match(r"^(?:\s|《|（|\(|\[|【|[-—])", tail):
+        return True
+    if tail.startswith(("：", ":")):
+        return len(s) <= 30 and not re.search(r"[。，！？；,;!?]", tail)
+    return False
+
+
 def episode_re():
     pat = (load_profile().get("episode", {}) or {}).get("header_pattern")
     if not pat:
@@ -138,14 +174,40 @@ def episode_en_re():
 
 
 def episode_number(line):
-    """Return the episode number captured by the configured header pattern."""
-    m = episode_re().match(normalize_line(line))
-    if not m:
-        return None
-    for gi in range(1, (m.re.groups or 0) + 1):
-        value = m.group(gi)
-        if value and value.strip().isdigit():
-            return int(value)
+    """Return the episode number for a header line.
+
+    Tolerant by design: Arabic or Chinese numerals, 第N集/第N话 and EP/Episode.
+    A long ``第N集：剧情梗概`` line is treated as a TOC entry, not a header.
+    """
+    s = normalize_line(line)
+    m = episode_re().match(s)
+    if m:
+        tail = s[m.end():].lstrip()
+        if not _episode_tail_ok(s, tail):
+            return None
+        for gi in range(1, (m.re.groups or 0) + 1):
+            value = m.group(gi)
+            if value and value.strip().isdigit():
+                return int(value)
+    m = re.match(r"^第\s*(\d+)\s*[集话]", s)
+    if m:
+        tail = s[m.end():].lstrip()
+        if not _episode_tail_ok(s, tail):
+            return None
+        return int(m.group(1))
+    m = re.match(r"^第\s*([零〇一二三四五六七八九十两]+)\s*[集话]", s)
+    if m:
+        tail = s[m.end():].lstrip()
+        if not _episode_tail_ok(s, tail):
+            return None
+        value = cn_number(m.group(1))
+        if value:
+            return value
+    m = re.match(r"(?i:episode|ep)\s*(\d+)", s)
+    if m:
+        return int(m.group(1))
+    if re.match(r"^(\d+)\s*[集话]\s*$", s):
+        return int(re.match(r"^(\d+)", s).group(1))
     return None
 
 
@@ -172,11 +234,36 @@ def extract_paragraph_xmls(xml):
     return re.findall(r"<w:p[ >].*?</w:p>", xml, re.S)
 
 
-def paragraph_text(p_xml):
-    parts = re.findall(r"<w:t[^>]*>(.*?)</w:t>", p_xml, re.S)
-    s = "".join(parts)
+def _xml_unescape(s):
     return (s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
              .replace("&apos;", "'").replace("&amp;", "&"))
+
+
+def paragraph_text(p_xml):
+    # Only <w:t> / <w:t ...>, never <w:tab>, <w:tabs>, <w:tbl>, <w:textAlignment>.
+    parts = re.findall(r"<w:t(?![A-Za-z])(?:\s[^>]*)?>(.*?)</w:t>", p_xml, re.S)
+    return _xml_unescape("".join(parts))
+
+
+def paragraph_text_lines(p_xml):
+    """Extract visible lines from one paragraph, honoring <w:br/> and <w:tab/>."""
+    body = re.sub(r"<w:tab[^>]*/>", " ", p_xml)
+    body = re.sub(r"<w:br[^>]*/>", "\n", body)
+    body = re.sub(r"<w:cr[^>]*/>", "\n", body)
+    parts = re.findall(r"<w:t(?![A-Za-z])(?:\s[^>]*)?>(.*?)</w:t>", body, re.S)
+    return _xml_unescape("".join(parts)).split("\n")
+
+
+def extract_source_units(docx_path):
+    """Return (units, paragraph_xmls, document_xml); one unit per visible line."""
+    with zipfile.ZipFile(docx_path) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    px = extract_paragraph_xmls(xml)
+    units = []
+    for pi, p in enumerate(px):
+        for si, line in enumerate(paragraph_text_lines(p)):
+            units.append({"text": line, "para": pi, "sub": si})
+    return units, px, xml
 
 
 def escape_xml(s):
@@ -300,7 +387,10 @@ QUOTE_CHARS = "「」『』“”‘’\"'"
 
 
 def is_structural_line(s):
-    return bool(struct_re().match(s))
+    s = normalize_line(s)
+    if struct_re().match(s):
+        return True
+    return episode_number(s) is not None
 
 
 def strip_quotes(s):
@@ -309,6 +399,84 @@ def strip_quotes(s):
 
 def spoken_norm(s):
     return re.sub(r"\s+", "", strip_quotes(s))
+
+
+ATOM_MARKS = "△▲●◆■▪▶►"
+
+
+def normalize_episode_header_text(s):
+    """第X集（中文数字）→ 第N集，保留后续标题文字。"""
+    m = re.match(r"^第\s*([零〇一二三四五六七八九十两]+)\s*([集话])(.*)$", s)
+    if not m:
+        return s
+    value = cn_number(m.group(1))
+    if not value:
+        return s
+    return f"第{value}{m.group(2)}{m.group(3)}"
+
+
+def _looks_like_scene(body):
+    b = (body or "").strip()
+    if not b or len(b) > 80:
+        return False
+    if re.search(r"[：:]", b):
+        return False
+    toks = b.replace("\u3000", " ").split()
+    if any(x in toks for x in ("内", "外", "内外", "内/外", "内景", "外景")):
+        return True
+    return bool(toks and re.match(r"^(日|夜|晨|黄昏|傍晚|清晨|深夜|中午|下午|上午|凌晨|白天|雨|雪)", toks[0]))
+
+
+def prepare_source_units(units):
+    """Format-only normalization on ingest.
+
+    Only touches atom markers, episode headers, scene numbering and the [EN]
+    language prefix. Dialogue text, speakers and labels are never changed.
+    """
+    stats = {"header_normalized": 0, "atom_normalized": 0,
+             "scene_normalized": 0, "en_prefix_stripped": 0, "toc_skipped": 0}
+    texts = []
+    for u in units:
+        raw = u.get("text") or ""
+        t = normalize_line(raw)
+        if not t:
+            texts.append("")
+            continue
+        new = normalize_episode_header_text(t)
+        if new != t:
+            stats["header_normalized"] += 1
+            t = new
+        if t[0] in ATOM_MARKS and t[0] != "△":
+            t = "△" + t[1:].lstrip()
+            stats["atom_normalized"] += 1
+        m = re.match(r"^[\[【]\s*(?:EN|英|英文)\s*[\]】]\s*[：:]?\s*", t, re.I)
+        if m:
+            t = t[m.end():]
+            stats["en_prefix_stripped"] += 1
+        texts.append(t)
+
+    eps = locate_episodes(texts)
+    for k, (i, n, _title) in enumerate(eps):
+        j = eps[k + 1][0] if k + 1 < len(eps) else len(texts)
+        for idx in range(i, j):
+            t = texts[idx]
+            if not t:
+                continue
+            m = re.match(r"^(\d+)\s*[.、]\s*(\S.*)$", t)
+            if m and _looks_like_scene(m.group(2)):
+                texts[idx] = f"{n}-{m.group(1)} {m.group(2)}"
+                stats["scene_normalized"] += 1
+
+    stats["toc_skipped"] = sum(
+        1 for t in texts if re.match(r"^第\s*\d+\s*集\s*[：:]", t) and len(t) > 30)
+    return [{"text": t, "para": u["para"], "sub": u["sub"]}
+            for u, t in zip(units, texts)], stats
+
+
+def prepare_source_lines(texts):
+    units = [{"text": t, "para": i, "sub": 0} for i, t in enumerate(texts)]
+    prepared, _stats = prepare_source_units(units)
+    return [u["text"] for u in prepared]
 
 
 def detect_tag(s):
@@ -321,6 +489,76 @@ def detect_tag(s):
         if re.search(r"[（(]" + tag + r"(?:[，,、：:)]|\s|$)", s, re.I):
             return canonical
     return None
+
+
+def raw_label(prefix):
+    """Return the label exactly as written in the source prefix, or ''."""
+    for lab in ("对白", "VO", "OS"):
+        if re.search(r"[（(]\s*" + re.escape(lab) + r"(?=[，,、：:）)\s]|$)", prefix):
+            return lab
+    for lab in ("DIALOGUE", "DIALOG"):
+        if re.search(r"[（(]\s*" + lab + r"(?=[，,、：:)]|\s|$)", prefix, re.I):
+            return lab
+    return ""
+
+
+def canonical_label(raw):
+    return "对白" if raw in ("对白", "DIALOGUE", "DIALOG") else (raw or "")
+
+
+def canon_dialogue_text(s):
+    s = normalize_line(s)
+    s = s.replace("：", ":").replace("（", "(").replace("）", ")")
+    return re.sub(r"\s+", "", s)
+
+
+def dialogue_hash(s):
+    return hashlib.sha1(canon_dialogue_text(s).encode("utf-8")).hexdigest()[:10]
+
+
+META_PREFIXES = ("镜头", "转场", "插入帧", "片长", "时长", "时间", "地点", "场景",
+                 "备注", "说明", "注", "字幕", "集数", "剧名", "题材", "关键词")
+
+
+def parse_dialogue_line(line):
+    """Parse one source/output line as a dialogue record, labelled or not."""
+    s = normalize_line(line)
+    if not s or s.startswith("△"):
+        return None
+    if episode_number(s) is not None or is_structural_line(s):
+        return None
+    if re.match(r"^\d+[-－]\d+\s", s):
+        return None
+    if re.match(r"^(?:人物|出场人物)\s*[：:]", s):
+        return None
+    if s.startswith("【") or re.match(r"^(?:SPECTACLE|VFX|HERO)\b", s):
+        return None
+    sp = split_speaker(s)
+    if not sp:
+        return None
+    prefix, body = sp
+    if re.match(r"^[\d\s.、\-－]+$", prefix):
+        return None
+    if prefix in META_PREFIXES or any(prefix.startswith(p) for p in META_PREFIXES):
+        return None
+    speaker = re.split(r"[（(]", prefix, 1)[0].strip().strip("[]【】").strip()
+    if not speaker:
+        return None
+    # Leading parenthetical inside the body is a performance hint, not dialogue text.
+    pm = re.match(r"^([（(][^）)]*[）)])\s*(.*)$", body)
+    if pm:
+        body = pm.group(2).strip()
+    if not body:
+        return None
+    raw = raw_label(prefix)
+    return {
+        "speaker": speaker,
+        "label_raw": raw,
+        "label": canonical_label(raw),
+        "text": body,
+        "hash": dialogue_hash(body),
+        "lang": spoken_lang(s) or "",
+    }
 
 
 def is_latin_dominant(s):
