@@ -10,7 +10,7 @@
 用法：
   python tools/audit_dialogue.py
   python tools/audit_dialogue.py --draft
-  python tools/audit_dialogue.py --final output/xxx_导演执行版.docx
+  python tools/audit_dialogue.py --final output/xxx_竖屏分镜稿.docx
   python tools/audit_dialogue.py --dir work/source
 """
 import argparse
@@ -300,8 +300,8 @@ def split_final(root, final_arg, mode):
     # default: final product, md first then docx
     meta = C.load_json(root / "work" / "meta" / "source_dialogue.meta.json", {}) or {}
     stem = Path(meta.get("source", "剧本")).stem
-    for cand in (root / "output" / f"{stem}_导演执行版.md",
-                 root / "output" / f"{stem}_导演执行版.docx"):
+    for cand in (root / "output" / f"{stem}_竖屏分镜稿.md",
+                 root / "output" / f"{stem}_竖屏分镜稿.docx"):
         if cand.exists():
             return split_final(root, cand, mode)
     raise ValueError("未找到成品；请先运行 /炼剧本，或使用 --source/--draft/--final")
@@ -406,7 +406,7 @@ def main():
         print(f"EP{s['ep']:02d} 行{s['rows']}｜OK {s['ok']}｜补标(对白) {s['labeled']}｜"
               f"需确认 {s['confirm']}｜格式 {s['format']}｜失败 {s['fails']}")
     print(f"[{'FAIL' if total_fails else 'PASS'}] dialogue audit rows={len(rows)} fails={total_fails}")
-    print(f"[OK] {audit_path}（由质检报告呈现，不单独生成输出文件）")
+    print(f"[OK] {audit_path}（供交付核对，不单独生成输出文件）")
     if args.fail_on_diff and total_fails:
         return 1
     return 0
