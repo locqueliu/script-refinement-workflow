@@ -181,12 +181,23 @@ def check_ep(ep, profile):
             fails.append(f"A profile 出现 {cn} 行中文台词（只保留英文）")
     cjk = C.cjk_count("\n".join(ep["raw"]))
     shots = sum(len(g["shots"]) for g in groups)
-    if not (int(profile["groups_per_ep"][0]) <= len(groups) <= int(profile["groups_per_ep"][1])):
-        warns.append(f"分镜组数 {len(groups)} 不在建议范围 {profile['groups_per_ep']}")
-    if not (int(profile["shots_per_ep"][0]) <= shots <= int(profile["shots_per_ep"][1])):
-        warns.append(f"镜头数 {shots} 不在建议范围 {profile['shots_per_ep']}")
-    if not (int(profile["cjk_per_ep"][0]) <= cjk <= int(profile["cjk_per_ep"][1])):
-        warns.append(f"中文 {cjk} 字不在建议范围 {profile['cjk_per_ep']}")
+    g_lo, g_hi = int(profile["groups_per_ep"][0]), int(profile["groups_per_ep"][1])
+    s_lo, s_hi = int(profile["shots_per_ep"][0]), int(profile["shots_per_ep"][1])
+    c_lo, c_hi = int(profile["cjk_per_ep"][0]), int(profile["cjk_per_ep"][1])
+    if len(groups) > g_hi:
+        fails.append(f"分镜组数 {len(groups)} 超出目标上限 {g_hi}（150s 是上限，不是目标）")
+    elif len(groups) < g_lo:
+        warns.append(f"分镜组数 {len(groups)} 低于目标下限 {g_lo}")
+    if shots > s_hi:
+        fails.append(f"镜头数 {shots} 超出目标上限 {s_hi}")
+    elif shots < s_lo:
+        warns.append(f"镜头数 {shots} 低于目标下限 {s_lo}")
+    if cjk > c_hi:
+        fails.append(f"中文字数 {cjk} 超出目标上限 {c_hi}，需压缩重复动作/修饰")
+    elif cjk < c_lo:
+        warns.append(f"中文字数 {cjk} 低于目标下限 {c_lo}")
+    if total_dur > float(profile.get("episode_warn_above", 145.0)):
+        warns.append(f"单集时长 {round(total_dur, 1)}s 贴近 150s 上限，确认是否必要")
     return fails, warns
 
 
@@ -240,10 +251,18 @@ def check_plan(plan, profile):
             fails.append(f"计划分镜{no} 镜头时长合计 {round(total, 2)} ≠ {dur}")
     if total_dur > float(profile["episode_max"]) + tol:
         fails.append(f"计划单集时长 {round(total_dur, 1)} 超限")
-    if not (int(profile["groups_per_ep"][0]) <= len(groups) <= int(profile["groups_per_ep"][1])):
-        warns.append(f"计划分镜组数 {len(groups)} 不在建议范围")
-    if not (int(profile["shots_per_ep"][0]) <= shots_total <= int(profile["shots_per_ep"][1])):
-        warns.append(f"计划镜头数 {shots_total} 不在建议范围")
+    if total_dur > float(profile.get("episode_warn_above", 145.0)):
+        warns.append(f"计划单集时长 {round(total_dur, 1)}s 贴近 150s 上限，确认是否必要")
+    g_lo, g_hi = int(profile["groups_per_ep"][0]), int(profile["groups_per_ep"][1])
+    s_lo, s_hi = int(profile["shots_per_ep"][0]), int(profile["shots_per_ep"][1])
+    if len(groups) > g_hi:
+        fails.append(f"计划分镜组数 {len(groups)} 超出目标上限 {g_hi}")
+    elif len(groups) < g_lo:
+        warns.append(f"计划分镜组数 {len(groups)} 低于目标下限 {g_lo}")
+    if shots_total > s_hi:
+        fails.append(f"计划镜头数 {shots_total} 超出目标上限 {s_hi}")
+    elif shots_total < s_lo:
+        warns.append(f"计划镜头数 {shots_total} 低于目标下限 {s_lo}")
     return fails, warns
 
 
