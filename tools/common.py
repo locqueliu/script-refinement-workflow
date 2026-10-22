@@ -552,11 +552,12 @@ def parse_storyboard_dialogue(line):
         return None
     if any(prefix.startswith(p) for p in META_PREFIXES):
         return None
-    # Camera prose often ends with a sentence before its colon; it is not a speaker.
-    if len(prefix) > 24 or re.search(r"[。！？；，,;!?]", prefix):
-        return None
+    # Camera prose has punctuation/length before any parenthetical; a speaker name
+    # followed by a performance/OS annotation is legitimate even when the annotation is long.
     speaker = re.split(r"[（(]", prefix, 1)[0].strip().strip("[]【】").strip()
     if not speaker:
+        return None
+    if len(speaker) > 24 or re.search(r"[。！？；，,;!?]", speaker):
         return None
     # Leading parenthetical inside the body is a performance hint, not dialogue text.
     pm = re.match(r"^([（(][^）)]*[）)])\s*(.*)$", body)

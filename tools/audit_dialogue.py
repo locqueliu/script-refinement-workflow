@@ -143,7 +143,80 @@ def compare_records(ep, src, out):
                      src_tag, out_tag, src_text, out_text, statuses, notes)]
 
 
+def align_by_lang_chunks(ep, src_records, out_records):
+    """Match source lines to one or more consecutive same-language output chunks.
+
+    This is the normal case for compliant long-line splitting: CN and EN streams are
+    consumed independently, so interleaved CN/EN chunks still map back to source.
+    Returns None when a real text change/order shift is detected, letting the
+    hash-based matcher handle it.
+    """
+    pools = {}
+    for r in out_records:
+        lang = r.get("lang") or ""
+        if lang not in ("cn", "en"):
+            return None
+        pools.setdefault(lang, []).append(r)
+    cursor = {k: 0 for k in pools}
+    rows = []
+    for s in src_records:
+        lang = s.get("lang") or ""
+        if lang not in ("cn", "en"):
+            return None
+        target = C.canon_dialogue_text(s.get("text", ""))
+        if not target:
+            return None
+        pool = pools.get(lang, [])
+        pos = cursor.get(lang, 0)
+        chunks = []
+        concat = ""
+        while pos < len(pool):
+            rec = pool[pos]
+            concat += C.canon_dialogue_text(rec.get("text", ""))
+            chunks.append(rec)
+            pos += 1
+            if concat == target:
+                break
+            if not target.startswith(concat):
+                return None
+        if concat != target or not chunks:
+            return None
+        cursor[lang] = pos
+        statuses = [text_status(s.get("text", ""), "".join(r.get("text", "") for r in chunks))]
+        notes = []
+        if len(chunks) > 1:
+            statuses.append("拆分-允许")
+            notes.append(f"{lang.upper()} 长句拆为 {len(chunks)} 段")
+        src_tag = s.get("label", "") or s.get("tag", "")
+        tags = [(r.get("label") or r.get("tag") or "") for r in chunks]
+        explicit = [t for t in tags if t]
+        if src_tag:
+            if not explicit:
+                statuses.append("标签丢失")
+            elif any(t != src_tag for t in explicit):
+                statuses.append("标签改动")
+        else:
+            if any(t in ("VO", "OS") for t in explicit):
+                statuses.append("补标-需确认")
+            elif any(t == "对白" for t in explicit):
+                statuses.append("补标-对白")
+        if any(C.spoken_norm(r.get("speaker", "")) != C.spoken_norm(s.get("speaker", ""))
+               for r in chunks):
+            statuses.append("说话人改动")
+        out_text = "".join(r.get("text", "") for r in chunks) if lang == "cn" \
+            else " ".join(r.get("text", "") for r in chunks)
+        rows.append(make_row(ep, s.get("no", ""), s.get("scene", ""), s.get("speaker", ""),
+                             src_tag, explicit[0] if explicit else "", s.get("text", ""),
+                             out_text, statuses, notes))
+    if any(cursor.get(k, 0) < len(v) for k, v in pools.items()):
+        return None
+    return rows
+
+
 def align_episode(ep, src_records, out_records):
+    by_chunks = align_by_lang_chunks(ep, src_records, out_records)
+    if by_chunks is not None:
+        return by_chunks
     events = []
     sm = difflib.SequenceMatcher(None, [r.get("hash", "") for r in src_records],
                                  [r.get("hash", "") for r in out_records], autojunk=False)
@@ -333,8 +406,9 @@ def build_report(rows, meta):
     return summary, total_fails
 
 
-def write_audit(root, meta, rows, summary, total_fails):
+def write_audit(root, meta, rows, summary, total_fails, missing_eps=None):
     """Write machine-readable audit result; the final QC report consumes it."""
+    missing_eps = missing_eps or []
     report = {
         "generated": datetime.datetime.now().isoformat(timespec="seconds"),
         "source": meta,
@@ -345,6 +419,7 @@ def write_audit(root, meta, rows, summary, total_fails):
             "confirm": sum(1 for r in rows if "补标-需确认" in r["状态"]),
             "format_only": sum(1 for r in rows if "格式差异" in r["状态"]),
             "split": sum(1 for r in rows if "拆分-允许" in r["状态"]),
+            "missing_eps": missing_eps,
         },
         "summary": summary,
         "rows": rows,
@@ -361,6 +436,8 @@ def main():
     ap.add_argument("--source", action="store_true", help="对账 work/source/ep*.md")
     ap.add_argument("--draft", action="store_true", help="对账 work/draft/ep*.md")
     ap.add_argument("--dir", default=None, help="对账指定目录下的 ep*.md")
+    ap.add_argument("--include-missing", action="store_true",
+                    help="把台账中未出现在目标里的集按漏句处理（默认跳过）")
     ap.add_argument("--fail-on-diff", action="store_true")
     args = ap.parse_args()
     root = Path(args.root) if args.root else C.ROOT
@@ -395,11 +472,15 @@ def main():
     for ep, lines in sorted(targets):
         src_rows = ledger_by_ep.get(ep, [])
         rows += align_episode(ep, src_rows, collect_records(lines))
-    for ep in sorted(set(ledger_by_ep) - target_eps):
-        rows += align_episode(ep, ledger_by_ep[ep], [])
+    missing_eps = sorted(set(ledger_by_ep) - target_eps)
+    if missing_eps and args.include_missing:
+        for ep in missing_eps:
+            rows += align_episode(ep, ledger_by_ep[ep], [])
 
     summary, total_fails = build_report(rows, meta)
-    audit_path = write_audit(root, meta, rows, summary, total_fails)
+    audit_path = write_audit(root, meta, rows, summary, total_fails, missing_eps)
+    if missing_eps:
+        print(f"[WARN] 未覆盖集 {missing_eps}（默认跳过；需要按漏句统计请加 --include-missing）")
     for s in summary:
         if not (s["fails"] or s["confirm"] or s["labeled"]):
             continue
