@@ -21,6 +21,7 @@ SHOT_BLOCK_RE = re.compile(r"^【.+】$")
 BLOCKING_RE = re.compile(r"^【人物站位")
 SKIP_BLOCK_PREFIX = ("【人物站位", "【音效", "【制作", "【全局")
 SHOT_SIZE_SEP = re.compile(r"[·・/／、\s]")
+SHOT_DURATION_RE = re.compile(r"[·・]\s*约?\s*\d+(?:\.\d+)?\s*(?:s|秒)\s*】$", re.I)
 
 
 def extra_checks(src_text, draft_text):
@@ -58,6 +59,9 @@ def extra_checks(src_text, draft_text):
             fails.append(f"blocking_fmt:{bad}/{len(blocks)}")
         elif bad:
             warns.append(f"blocking_fmt:{bad}/{len(blocks)}")
+        duration_blocks = [drf_lines[i] for i in blocks if SHOT_DURATION_RE.search(drf_lines[i])]
+        if duration_blocks:
+            warns.append(f"shot_duration_field:{len(duration_blocks)}")
         sizes = []
         for i in blocks:
             inner = drf_lines[i][1:-1]
