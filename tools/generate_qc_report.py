@@ -81,8 +81,9 @@ def cell(s):
     return str(s).replace("|", "｜").replace("\n", " ").strip()
 
 
-def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, culture=None):
+def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, culture=None, punctuation=None):
     culture = culture or []
+    punctuation = punctuation or []
     lines = [f"# 《{stem}》质检报告", "",
              f"- 生成时间：{datetime.datetime.now().isoformat(timespec='seconds')}",
              f"- 集数：{len(eps)}", ""]
@@ -102,6 +103,10 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
     culture_must = [r for r in culture if isinstance(r, dict) and r.get("severity") == "must_fix"]
     culture_sus = [r for r in culture if isinstance(r, dict) and r.get("severity") == "suspected"]
     culture_eps = sorted({int(r["ep"]) for r in culture if isinstance(r, dict) and "ep" in r})
+    punct = [r for r in punctuation if isinstance(r, dict)]
+    punct_must = [r for r in punct if r.get("severity") == "must_fix"]
+    punct_warn = [r for r in punct if r.get("severity") == "warn"]
+    punct_eps = sorted({int(r["ep"]) for r in punct if "ep" in r})
 
     lines += ["## 总览", "", "| 项目 | 结果 |", "|---|---|"]
     if fix_eps:
@@ -119,6 +124,10 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
         lines.append(f"| 文化背景审查（信息项，SOURCE 唯一依据） | must_fix {len(culture_must)} 项；suspected {len(culture_sus)} 项；涉及 {len(culture_eps)} 集（明细见第五节）|")
     else:
         lines.append("| 文化背景审查（信息项，SOURCE 唯一依据） | 未执行或未命中 |")
+    if punct:
+        lines.append(f"| 英文台词标点审查（信息项，只报告） | must_fix {sum(r.get('count', 1) for r in punct_must)} 项；warn {sum(r.get('count', 1) for r in punct_warn)} 项；涉及 {len(punct_eps)} 集（明细见第六节）|")
+    else:
+        lines.append("| 英文台词标点审查（信息项，只报告） | 未执行或未命中 |")
     if pre_fail:
         lines.append(f"| 前置阶段台词变动（源稿→优化存档） | 有：{'、'.join(f'EP{n:02d}' for n in pre_fail)} |")
     else:
@@ -261,7 +270,25 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
                 lines.append(f"| EP{n:02d} | {cell(it.get('problem', ''))} | {cell(it.get('action', ''))} |")
         lines.append("")
 
-    lines += ["## 六、结论", ""]
+    lines += ["## 六、英文台词标点审查", "",
+              "说明：本项由 `tools/preflight_punctuation_check.py` 扫描 SOURCE 中的英文台词正文生成，**只报告、不自动修改**。",
+              "- 检查范围：带 DIALOGUE/VO/OS 标签的英文台词正文（冒号后的 text）。",
+              "- 重点：中文全角标点、全角空格、全角分隔冒号，以及明显的空格问题。",
+              "- 中文表演提示不在本项范围内。", ""]
+    if punct:
+        lines += ["| 集 | 段落 | 问题 | 次数 | 级别 | 上下文 / 建议 |",
+                  "|---|---:|---|---:|---|---|"]
+        for r in punct:
+            lines.append(
+                f"| EP{int(r.get('ep', 0)):02d} | {r.get('paragraph', '—')} | {cell(r.get('char', ''))} | "
+                f"{r.get('count', 1)} | {cell(r.get('severity', ''))} | "
+                f"{cell(r.get('context', ''))} / {cell(r.get('suggestion', ''))} |"
+            )
+        lines.append("")
+    else:
+        lines += ["未执行英文台词标点检查，或未发现问题。", ""]
+
+    lines += ["## 七、结论", ""]
     if not fix_eps and not pre_fail and not post_fail:
         lines.append("- 剧情：无较大剧情修改，仅动作丰富与格式整理。")
     elif fix_eps:
@@ -278,6 +305,10 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
         lines.append(f"- 文化背景：must_fix {len(culture_must)} 项、suspected {len(culture_sus)} 项；动作行已交优化器中性化，台词/锁行需人工复核（详见第五节）。")
     else:
         lines.append("- 文化背景：未检测到需处理的中式元素。")
+    if punct_must or punct_warn:
+        lines.append(f"- 英文台词标点：must_fix {sum(r.get('count', 1) for r in punct_must)} 项、warn {sum(r.get('count', 1) for r in punct_warn)} 项；仅报告，未自动修改（详见第六节）。")
+    else:
+        lines.append("- 英文台词标点：未检测到中文标点或空格问题。")
     if pre_fail or post_fail:
         lines.append(f"- 台词：检测到变动集（前置：{pre_fail or '无'}；炼本：{post_fail or '无'}），请人工复核对应明细。")
     else:
@@ -429,8 +460,10 @@ def main() -> int:
     pacing = {"atom": ap_res, "dialogue": dd_res, "before": atoms_before, "after": atoms_after}
     culture_data = C.load_json(root / "work" / "preflight" / "culture.json", {}) or {}
     culture = culture_data.get("results", []) or []
+    punct_data = C.load_json(root / "work" / "preflight" / "punctuation.json", {}) or {}
+    punctuation = punct_data.get("results", []) or []
 
-    md = build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing, culture)
+    md = build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing, culture, punctuation)
     out_dir = Path(args.out_dir) if args.out_dir else (root / "output")
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / f"{stem}_质检报告.md"
