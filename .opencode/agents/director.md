@@ -1,7 +1,6 @@
 ---
 description: 单集炼稿工人：读取全部技能文件，将一集 SOURCE 富化为导演执行稿并写盘
 mode: all
-model: "deepseek/deepseek-flash#low"
 permissions:
   - action: read
     resource: "*"

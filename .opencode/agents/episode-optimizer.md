@@ -1,7 +1,6 @@
 ---
 description: 单集修复优化＋格式标准化：修复质检确认的问题、适度丰富动作并整理格式，一次输出最终存档稿，台词逐字锁定
 mode: all
-model: "deepseek/deepseek-flash#low"
 permissions:
   - action: read
     resource: "*"

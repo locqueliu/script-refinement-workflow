@@ -1,7 +1,6 @@
 ---
 description: 全剧分析：归纳核心主线、全剧梗概、核心卖点、人物动机与性格、核心驱动
 mode: all
-model: "deepseek/deepseek-flash#low"
 permissions:
   - action: read
     resource: "*"

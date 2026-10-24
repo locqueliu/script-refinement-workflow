@@ -1,7 +1,6 @@
 ---
 description: 竖屏分镜计划器：把一集 SOURCE 规划为分镜组/镜头/时间轴/空间起点/台词拆分，只写 JSON 计划
 mode: all
-model: "deepseek/deepseek-flash"
 permissions:
   - action: read
     resource: "*"

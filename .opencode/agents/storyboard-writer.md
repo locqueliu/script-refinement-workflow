@@ -1,7 +1,6 @@
 ---
 description: 竖屏分镜写手：按计划 JSON 写成一集目标格式分镜稿，不改结构、不改台词
 mode: all
-model: "deepseek/deepseek-flash"
 permissions:
   - action: read
     resource: "*"

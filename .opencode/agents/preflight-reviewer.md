@@ -1,7 +1,6 @@
 ---
 description: 剧本前置质检：检查基础逻辑、人物台词场景一致性并给出 A/B/C 评级
 mode: all
-model: "deepseek/deepseek-flash#low"
 permissions:
   - action: read
     resource: "*"
