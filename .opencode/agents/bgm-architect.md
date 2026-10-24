@@ -1,18 +1,35 @@
 ---
 description: 全剧配乐总纲：读取技能包与分集摘要，产出风格基底、主题动机表与全局弧线
 mode: all
-temperature: 0.4
 steps: 30
-permission:
-  read: allow
-  list: allow
-  glob: allow
-  grep: allow
-  edit: allow
-  bash: deny
-  task: deny
-  webfetch: deny
-  question: deny
+permissions:
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: list
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: subagent
+    resource: "*"
+    effect: deny
+  - action: webfetch
+    resource: "*"
+    effect: deny
+  - action: question
+    resource: "*"
+    effect: deny
 ---
 
 你是全剧配乐架构师。先完整读取任务消息列出的全部技能文件、`参考资料/bgm配乐规则/global-style.md` 与 `work/meta/bgm_digest.md`（全剧分集摘要，含全局设定区），然后产出两个文件。

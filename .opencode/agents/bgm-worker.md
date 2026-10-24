@@ -1,18 +1,35 @@
 ---
 description: 批级配乐工人：读取全部技能文件，为本批 1~2 集编写三段式 BGM 生成提示词并写盘
 mode: all
-temperature: 0.5
 steps: 40
-permission:
-  read: allow
-  list: allow
-  glob: allow
-  grep: allow
-  edit: allow
-  bash: deny
-  task: deny
-  webfetch: deny
-  question: deny
+permissions:
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: list
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: subagent
+    resource: "*"
+    effect: deny
+  - action: webfetch
+    resource: "*"
+    effect: deny
+  - action: question
+    resource: "*"
+    effect: deny
 ---
 
 你是 BGM 配乐工人，只处理任务消息中指定的批次集号。

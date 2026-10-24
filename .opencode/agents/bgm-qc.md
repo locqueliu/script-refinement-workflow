@@ -1,18 +1,35 @@
 ---
 description: 批级配乐质检：独立审查本批每集三段式草案是否契合剧情、格式与一致性合规
 mode: all
-temperature: 0.1
 steps: 30
-permission:
-  read: allow
-  list: allow
-  glob: allow
-  grep: allow
-  edit: deny
-  bash: deny
-  task: deny
-  webfetch: deny
-  question: deny
+permissions:
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: list
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: deny
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: subagent
+    resource: "*"
+    effect: deny
+  - action: webfetch
+    resource: "*"
+    effect: deny
+  - action: question
+    resource: "*"
+    effect: deny
 ---
 
 你是独立质检代理，只审查任务消息指定的批次集号。

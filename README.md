@@ -23,7 +23,7 @@
 
 ## 快速开始
 
-1. 安装 Python 3.10+、`python-docx` 与 OpenCode V2。
+1. 安装 Python 3.10+、`python-docx` 与 OpenCode V2（已验证 CLI `v2.0.32` / service `2.1.4`）。
 2. 把**一个**剧本 `.docx` 放入 `剧本输入/`。
 3. 依次运行：
    - `/前置检查`
@@ -55,4 +55,4 @@ python -m pip install python-docx
 opencode --version
 ```
 
-建议使用 OpenCode V2，并在修改 `.opencode/` 配置后重启或新开会话。
+建议使用 OpenCode V2；修改 `.opencode/` 配置后 V2 会自动热重载，必要时执行 `/reload` 或新开会话。

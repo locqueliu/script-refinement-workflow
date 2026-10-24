@@ -1,18 +1,35 @@
 ---
 description: 全剧终检：审查三段式合成稿的跨集一致性、主题/乐器漂移与质量，输出问题清单
 mode: all
-temperature: 0.1
 steps: 30
-permission:
-  read: allow
-  list: allow
-  glob: allow
-  grep: allow
-  edit: allow
-  bash: deny
-  task: deny
-  webfetch: deny
-  question: deny
+permissions:
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: list
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: subagent
+    resource: "*"
+    effect: deny
+  - action: webfetch
+    resource: "*"
+    effect: deny
+  - action: question
+    resource: "*"
+    effect: deny
 ---
 
 你是全剧终检代理。先完整读取任务消息列出的全部技能文件、`参考资料/bgm配乐规则/global-style.md`、`work/meta/series-bible.md`、`work/meta/theme-map.json`，再完整读取任务消息指定的成品合成稿 `.md`。
