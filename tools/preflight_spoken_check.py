@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common as C
 
 MIN_WORDS = 100
-MAX_WORDS = 350
+MAX_WORDS = 300
 STRUCTURAL_RE = re.compile(
     r"^(?:第\s*\d+\s*集|(?i:episode)\s*\d+|\d+[-－]\d+\s|"
     r"(?:人物|出场人物)\s*[：:]|【|△)"
