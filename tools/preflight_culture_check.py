@@ -1,4 +1,4 @@
-"""前置文化背景检查（0 token）：扫描 SOURCE 中的中式元素/文化符号。
+"""前置文化背景检查（0 token）：扫描 SOURCE 中的中式元素、东方动作/礼仪。
 
 只报告、不阻断；命中项写入 work/preflight/culture.json，并合并进
 work/preflight/report.json 的 culture_issues 与 report.md。
@@ -16,6 +16,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common as C
 
+# 动作/礼仪类东方元素：跪礼、叩首、拱手、万福等。
+# 这些不是器物，而是身体动作与礼仪，极易在“丰富动作”时被无意识加入。
+ACTION_HARD_TERMS = (
+    "双膝跪地", "双膝下跪", "双膝跪倒", "三跪九叩", "跪地叩首",
+    "叩首", "磕头", "行跪礼", "跪礼", "跪叩",
+    "稽首", "顿首", "打千", "跪安", "道万福", "万福礼", "敛衽",
+    "拱手礼", "作揖礼", "抱拳礼",
+)
+
+# 可能是西式祈祷/求婚/受伤/体育动作，也可能是东方跪礼；先列为 suspected。
+ACTION_AMBIGUOUS_TERMS = (
+    "跪地", "长跪", "跪伏", "伏地跪", "跪坐", "正坐",
+    "五体投地", "合十", "请安",
+)
+
 # 高置信中式文化符号：出现即说明作者明确写了中式元素。
 HARD_TERMS = (
     "筷子", "筷架", "一筷之礼", "筷礼",
@@ -26,14 +41,16 @@ HARD_TERMS = (
     "春节", "中秋", "饺子", "茶道",
     "皇上", "王爷", "银两", "铜钱",
     "古筝", "琵琶", "二胡", "古琴", "笛子", "唢呐", "京剧",
-)
+) + ACTION_HARD_TERMS
 
 # 可能是合法译法/架空设定，也可能只是中文习惯；先列为 suspected，交人工判断。
 AMBIGUOUS_TERMS = (
     "中式", "古装", "宫廷",
     "家主", "老爷", "师父", "师兄", "掌柜", "店小二",
     "胡同", "弄堂", "书院", "科举", "镖局", "江湖",
-)
+) + ACTION_AMBIGUOUS_TERMS
+
+ACTION_TERMS = set(ACTION_HARD_TERMS + ACTION_AMBIGUOUS_TERMS)
 
 DEFAULT_PROFILE = {
     "market": "auto",
@@ -81,6 +98,12 @@ def suggestion_for(term: str, kind: str, fixable: bool) -> str:
         if kind == "dialogue":
             return "台词逐字锁定，不能自动改；需人工修改源稿，或由用户授权调整。"
         return "锁行/结构行，不能自动改；需人工修改源稿。"
+    if term in ACTION_TERMS:
+        if any(k in term for k in ("跪", "叩", "磕", "稽首", "顿首", "打千", "跪安")):
+            return "确认是否为 SOURCE 已建立的跪礼/臣服/朝拜动作；若未建立，改为单膝、蹲下、坐下、后退、低头或中性动作，不写双膝跪地/叩首。"
+        if term in ("合十", "五体投地"):
+            return "确认是否为 SOURCE 已建立的东方宗教/礼仪动作；若未建立，改为低头、后退、握手等中性动作。"
+        return "删除东方礼仪命名或动作，改为点头、欠身、后退、握手等文化中性行为。"
     if "礼" in term or term in ("拱手", "作揖", "跪拜", "拂袖", "抱拳"):
         return "删除文化礼仪命名或动作，改为文化中性的可拍行为。"
     if term in ("筷子", "筷架", "筷礼") or "筷" in term:
@@ -125,9 +148,13 @@ def scan(root: Path):
                 continue
             kind = kind_of(line)
             fixable = kind == "action"
-            for term in hard + ambiguous:
-                if term not in line:
+            matched = [t for t in hard + ambiguous if t in line]
+            kept = []
+            for term in sorted(matched, key=len, reverse=True):
+                if any(term in other for other in kept):
                     continue
+                kept.append(term)
+            for term in kept:
                 key = (ep, idx, term)
                 if key in seen:
                     continue
@@ -164,7 +191,7 @@ def scan(root: Path):
         "version": 1,
         "profile": profile,
         "profile_path": profile_path,
-        "rule": "SOURCE 未建立的中式元素/文化符号不得作为新增内容；台词锁定项只报告，不自动改。",
+        "rule": "SOURCE 未建立的中式元素、东方动作/礼仪（跪礼、叩首、双膝跪地、拱手、作揖等）不得作为新增内容；台词锁定项只报告，不自动改。",
         "blocking": False,
         "summary": summary,
         "results": results,
@@ -185,7 +212,7 @@ def scan(root: Path):
             base = base.split(marker, 1)[0].rstrip() + "\n"
         lines = ["", marker, "",
                  "规则（信息项，不阻断）：SOURCE 是文化/地域/时代的唯一依据。"
-                 "命中中式元素时，动作行可由优化器改为文化中性写法；台词/锁行只报告，不自动改。"
+                 "命中中式元素或东方动作/礼仪（跪礼、叩首、双膝跪地、拱手、作揖等）时，动作行可由优化器改为文化中性写法；台词/锁行只报告，不自动改。"
                  f"当前配置：market={profile.get('market')}，forbid_cn_elements={profile.get('forbid_cn_elements')}。", ""]
         if results:
             lines += ["| 集数 | 段落 | 类型 | 命中词 | 级别 | 可自动修复 | 上下文 / 建议 |",

@@ -43,8 +43,18 @@ def save_json(path, obj):
 
 # ---------------------------------------------------------------------------
 # 文化背景硬锁：SOURCE 未出现的中国/东方文化符号，不得由富化阶段新增。
+# 覆盖器物、服饰、称谓、节庆，以及动作/礼仪类东方元素（跪礼、叩首、拱手、万福等）。
 # 该表是确定性安全网，只覆盖高置信度词；语义判断仍以 director/optimizer 规则为准。
 # ---------------------------------------------------------------------------
+CULTURE_ACTION_TERMS = (
+    "双膝跪地", "双膝下跪", "双膝跪倒", "三跪九叩", "跪地叩首",
+    "叩首", "磕头", "行跪礼", "跪礼", "跪叩",
+    "稽首", "顿首", "打千", "跪安", "道万福", "万福礼", "敛衽",
+    "拱手礼", "作揖礼", "抱拳礼",
+    "跪地", "长跪", "跪伏", "伏地跪", "跪坐", "正坐",
+    "五体投地", "合十", "请安",
+)
+
 CULTURE_TERMS = (
     "中式", "筷子", "筷架", "一筷之礼", "筷礼",
     "拱手", "作揖", "跪拜", "拂袖", "抱拳",
@@ -55,20 +65,23 @@ CULTURE_TERMS = (
     "皇上", "王爷", "银两", "铜钱",
     "古筝", "琵琶", "二胡", "古琴", "笛子", "唢呐", "京剧",
     "家主", "老爷", "师父", "师兄",
-)
+) + CULTURE_ACTION_TERMS
 
 
 def culture_added_errors(src_text, draft_text):
     """Return terms present in draft but absent from source (source-aware check)."""
     src = src_text or ""
     draft = draft_text or ""
-    errors = []
+    matched = [term for term in CULTURE_TERMS if term in draft and term not in src]
     if "筷" in draft and "筷" not in src:
-        errors.append("culture_added:筷")
-    for term in CULTURE_TERMS:
-        if term in draft and term not in src:
-            errors.append(f"culture_added:{term}")
-    return errors
+        matched.append("筷")
+    # Drop redundant substrings: 双膝跪地 already covers 跪地, 筷子 already covers 筷.
+    kept = []
+    for term in sorted(set(matched), key=len, reverse=True):
+        if any(term in other for other in kept):
+            continue
+        kept.append(term)
+    return [f"culture_added:{term}" for term in kept]
 
 
 # ---------------------------------------------------------------------------
