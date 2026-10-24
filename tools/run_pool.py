@@ -14,9 +14,11 @@ import common as C
 
 BASE_PROMPT = (
     "Process episode ep{n:02d} strictly per .opencode/agents/director.md. "
-    "Read every required file listed there (all .md files under 参考资料/炼本细则/, global-style.md, work/meta/facts_lock.md, "
-    "work/meta/handoff.json entry, work/source/ep{n:02d}.md), enrich the episode into a director's shooting script, "
-    "then write work/draft/ep{n:02d}.md, work/report/ep{n:02d}.json and work/report/ep{n:02d}_production_notes.md. Reply with one status line only."
+    "Read every required file listed there (all .md files under 参考资料/炼本细则/, global-style.md, "
+    "work/meta/protagonist.json, work/preflight/protagonist.json, work/meta/facts_lock.md, "
+    "work/meta/handoff.json entry, work/source/ep{n:02d}.md), plan the P/R/N shot list first, then enrich the episode "
+    "into a director's shooting script. Write work/draft/ep{n:02d}.md, work/report/ep{n:02d}.json "
+    "(including shot_plan) and work/report/ep{n:02d}_production_notes.md. Reply with one status line only."
 )
 RETRY_SUFFIX = (
     " This is retry attempt. The previous automated check failed; read work/meta/retry_ep{n:02d}.txt "
@@ -83,7 +85,7 @@ def episode_task(n, args):
     print(f"[issue-pass] ep{n:02d} exceeded retries — attempting issue-pass", flush=True)
     issue_rec = force_issue_pass(n)
     if issue_rec.get("verdict") == "FAIL":
-        print(f"[culture-block] ep{n:02d} culture lock cannot be issue-passed", flush=True)
+        print(f"[hard-block] ep{n:02d} culture/protagonist lock cannot be issue-passed", flush=True)
         return {"ep": n, "result": "failed", "attempt": args.retries + 1,
                 "fails": issue_rec.get("fails", fails)}
     return {"ep": n, "result": "passed-with-issues", "attempt": args.retries + 1,
@@ -165,7 +167,17 @@ def main():
         targets = list(dict.fromkeys(int(x) for x in args.eps.replace(" ", "").split(",") if x))
     else:
         targets = [e["ep"] for e in meta["episodes"]
-                   if progress["episodes"].get(str(e["ep"]), {}).get("status") != "passed"]
+                   if progress["episodes"].get(str(e["ep"]), {}).get("status")
+                   not in ("passed", "blocked")]
+    blocked = {e["ep"] for e in meta["episodes"]
+               if progress["episodes"].get(str(e["ep"]), {}).get("status") == "blocked"}
+    blocked.update(C.blocked_episode_numbers())
+    blocked = sorted(n for n in blocked
+                     if progress["episodes"].get(str(n), {}).get("status")
+                     not in ("passed", "passed-with-issues"))
+    if blocked:
+        print(f"[WARN] blocked episodes (preflight protagonist coverage): {blocked}", flush=True)
+        targets = [n for n in targets if str(n) not in {str(x) for x in blocked}]
     if not targets:
         print("[OK] nothing to do")
         return 0

@@ -17,12 +17,22 @@ def main():
         print("[FAIL] run split_docx.py first")
         return 2
     progress = C.load_json(root / "work" / "meta" / "progress.json", {"episodes": {}})
-    passed, missing = [], []
+    passed, missing, blocked = [], [], []
     for e in meta["episodes"]:
         st = progress["episodes"].get(str(e["ep"]), {}).get("status", "pending")
         (passed if st in ("passed", "passed-with-issues") else missing).append(e["ep"])
+        if st == "blocked":
+            blocked.append(e["ep"])
+    blocked = sorted(set(blocked) | set(C.blocked_episode_numbers()))
+    blocked = [n for n in blocked
+               if progress["episodes"].get(str(n), {}).get("status")
+               not in ("passed", "passed-with-issues")]
+    if blocked:
+        print(f"[WARN] blocked episodes not refined: {blocked}")
     if missing and not args.allow_partial:
         print(f"[FAIL] not all passed: missing={missing}")
+        if blocked:
+            print("[FAIL] blocked episodes must be fixed in source or merged with --allow-partial")
         return 1
     stem = Path(meta["docx"]).stem
     header = (

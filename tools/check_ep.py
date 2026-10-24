@@ -16,7 +16,7 @@ MAX_DRAFT_CJK = 10000
 BASIC_FAIL_PREFIXES = ("too_long:", "no_draft_file", "missing_in_docx", "empty_draft",
                        "missing_dialogue:", "bilingual_desync:", "spoken_order:",
                        "en_label_language:", "en_label_missing:", "added_spoken:",
-                       "culture_added:")
+                       "culture_added:", "protagonist_")
 SHOT_BLOCK_RE = re.compile(r"^【.+】$")
 BLOCKING_RE = re.compile(r"^【人物站位")
 SKIP_BLOCK_PREFIX = ("【人物站位", "【音效", "【制作", "【全局")
@@ -104,6 +104,7 @@ def main():
         eps = [e["ep"] for e in meta["episodes"]]
     docx_map = docx_episodes(Path(args.docx)) if args.docx else None
     progress = C.load_json(root / "work" / "meta" / "progress.json", {"episodes": {}})
+    blocked_eps = set(C.blocked_episode_numbers())
     results = []
     overall_fail = 0
     for n in eps:
@@ -131,6 +132,12 @@ def main():
                 ef, ew = extra_checks(src_text, draft_text)
                 fails += ef
                 warns += ew
+                report = C.load_json_safe(
+                    root / "work" / "report" / f"ep{n:02d}.json", {}) or {}
+                pf, pw, ps = C.protagonist_shot_errors(n, src_text, draft_text, report)
+                fails += pf
+                warns += pw
+                stats.update(ps)
         # 硬失败只保留字数等基本问题；其余（含全部格式类）降级为 warn，不再打回。
         hard = [f for f in fails if f.startswith(BASIC_FAIL_PREFIXES)]
         demoted = [f for f in fails if not f.startswith(BASIC_FAIL_PREFIXES)]
@@ -138,9 +145,10 @@ def main():
         if demoted:
             warns = warns + ["fmt:" + d for d in demoted]
         # --allow-issue-pass：重试超限降级，把硬失败转为 passed-with-issues
-        # 文化背景硬锁不可降级：culture_added 必须保持 FAIL，避免“降级通过”绕过文化锁。
-        culture_block = [f for f in fails if f.startswith("culture_added:")]
-        if args.allow_issue_pass and fails and not culture_block:
+        # 文化背景与主角镜头硬锁不可降级，避免“降级通过”绕过。
+        hard_block = [f for f in fails
+                      if f.startswith(("culture_added:", "protagonist_"))]
+        if args.allow_issue_pass and fails and not hard_block:
             verdict = "PASS"
             issue_lines = [f"# EP{n:02d} 校验未通过项（降级通过）\n",
                            f"生成时间：{datetime.datetime.now().isoformat(timespec='seconds')}\n",
@@ -159,15 +167,15 @@ def main():
         else:
             verdict = "PASS" if not fails else "FAIL"
             issue_status = None
-            if culture_block:
-                warns = warns + ["culture_block:" + f for f in culture_block]
+            if hard_block:
+                warns = warns + ["hard_block:" + f for f in hard_block]
         if fails:
             overall_fail += 1
         rec = {"ep": n, "verdict": verdict, "fails": fails, "warns": warns, "stats": stats, "mode": mode}
         results.append(rec)
         if not args.docx:
             C.save_json(root / "work" / "report" / f"check_ep{n:02d}.json", rec)
-            if not args.no_progress:
+            if not args.no_progress and n not in blocked_eps:
                 key = str(n)
                 pe = progress["episodes"].get(key, {})
                 if issue_status:

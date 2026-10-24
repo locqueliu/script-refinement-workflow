@@ -26,20 +26,33 @@ permissions:
 
 ## 第一步：完整读取全部必读文件（缺一不可，读完后才开始创作）
 
-1. `参考资料/炼本细则/` 目录下的全部 .md 文件：先列出该目录，再逐份完整读完；主技能与全部补充文件一份都不能少。
+1. `参考资料/炼本细则/` 目录下的全部 .md 文件：先列出该目录，再逐份完整读完；主技能与全部补充文件一份都不能少（含 `protagonist-shot-design.md`）。
 2. `global-style.md`（全局制作规格与禁令）。
-3. `work/meta/format.json` 与 `work/meta/format_rules.md`（本项目格式规则：集标题/场次/人物行/原子符号/台词标签以它为准；命中 `locked_line_patterns` 的行必须逐字原样保留，不得当台词改写）。
-4. `work/meta/facts_lock.md`（全局锁定事实）。
-5. `work/meta/handoff.json`（只使用与本次任务集号对应的条目，用于跨集接点）。
-6. `work/source/epNN.md`（本次任务剧集源文，NN 见任务消息）。
-7. `work/preflight/optimized/epNN.json`（本集前置修复优化记录；若不存在则在制作说明中注明“无前置优化记录”）。
+3. `shot-profile.json` 与 `work/meta/protagonist.json`（单主角自动识别结果与镜头比例配置）。
+4. `work/meta/format.json` 与 `work/meta/format_rules.md`（本项目格式规则：集标题/场次/人物行/原子符号/台词标签以它为准；命中 `locked_line_patterns` 的行必须逐字原样保留，不得当台词改写）。
+5. `work/meta/facts_lock.md`（全局锁定事实）。
+6. `work/meta/handoff.json`（只使用与本次任务集号对应的条目，用于跨集接点）。
+7. `work/source/epNN.md`（本次任务剧集源文，NN 见任务消息）。
+8. `work/preflight/optimized/epNN.json`（本集前置修复优化记录；若不存在则在制作说明中注明“无前置优化记录”）。
+9. `work/preflight/protagonist.json`（本集 `scene_map`：哪些场次有主角在场；有主角在场的场次必须有 P/R）。
 
 ## 第二步：执行技能
 
 严格按主技能主链路处理该集：
-`LOCK SOURCE → DRAMA/BUDGET → FIRST REVEAL → SPACE/PROP STATE → INFORMATION/OBSERVATION → BLOCKING/PERFORMANCE/REACTION → CAMERA MOTIVATION → GEOGRAPHY/9:16/SHOT SIZE → ACTION/CAUSAL RESULT → VFX OPPORTUNITY FLAG → ABSORB BEFORE ADD → NARRATIVE PRESENCE CHECK → INFORMATION LOAD CHECK → CUT HANDOFF → FRAME SCAN → TIME/SOUND/MATERIAL → EXPANSION PASS → ECONOMY PASS → ROUND TRIP → OUTPUT`
+`LOCK SOURCE → DRAMA/BUDGET → PROTAGONIST THROUGHLINE → FIRST REVEAL → SPACE/PROP STATE → INFORMATION/OBSERVATION → BLOCKING/PERFORMANCE/REACTION → SHOT PLAN / PROTAGONIST COVERAGE → CAMERA MOTIVATION → GEOGRAPHY/9:16/SHOT SIZE → ACTION/CAUSAL RESULT → VFX OPPORTUNITY FLAG → ABSORB BEFORE ADD → NARRATIVE PRESENCE CHECK → INFORMATION LOAD CHECK → CUT HANDOFF → FRAME SCAN → TIME/SOUND/MATERIAL → EXPANSION PASS → ECONOMY PASS → ROUND TRIP → OUTPUT`
 
-## 第三步：写盘（只允许写这三个文件，不得写其他位置）
+## 第三步：镜头规划设计（强制，先规划后写）
+
+在写正文前，先按 `参考资料/炼本细则/protagonist-shot-design.md` 完成本集镜头规划。
+
+1. 读 `work/meta/protagonist.json`：本剧只有一位主角，自动识别，不做双主角。
+2. 读 `work/preflight/protagonist.json` 本集 `scene_map`：`has_protagonist=true` 的场次必须有 P/R；`false` 的场次允许 N，但计入 N 比例。
+3. 按场次列出镜头规划：`场次｜镜号｜主体｜subject_type｜关系(P/R/N)｜关联点｜功能`。
+4. 自检：主角关联镜 `(P+R)/total` ≥70%；主角本人镜 `P/total` ≥35%；纯 N ≤30%；连续 N ≤2；连续配角互动 N ≤2；有主角在场的场次至少 1 个 P/R。
+5. 规划不达标时先改规划，不要靠正文硬塞；不得新增 SOURCE 未建立的主角在场、能力、关系或事件。
+6. 把 `shots` 与 `stats` 写入 `work/report/epNN.json` 的 `shot_plan`，再写 `work/draft/epNN.md`。
+
+## 第四步：写盘（只允许写这三个文件，不得写其他位置）
 
 1. `work/draft/epNN.md`：完整一集导演执行稿。
    - 第一行必须为该集标题行（与源文一致），其后为全部场次正文，源文顺序不变。
@@ -53,7 +66,48 @@ permissions:
    - 每场至少一个 `SPECTACLE: [奇观名]`（可独立成片、有启动—变化—峰值—落幅）；VFX 候选可标 `VFX: ...`。
    - **单集字数上限（强制）**：本集成品（`work/draft/epNN.md`）中文（CJK）字数**不得超过 10000 字**；超出即视为失败，必须在 ECONOMY PASS 中精简到 10000 字以内。
    - 只输出可拍正文：不写审计、不写方法论、不加说明层。
-2. `work/report/epNN.json`：`{“ep”: N, “status”: “OK”, “atoms_src”: X, “atoms_out”: Y, “scenes”: S, “spectacle”: C, “spectacle_names”: [...], “cjk”: Z}`
+2. `work/report/epNN.json`：严格 JSON，至少包含以下字段：
+
+```json
+{
+  "ep": 1,
+  "status": "OK",
+  "atoms_src": 0,
+  "atoms_out": 0,
+  "scenes": 0,
+  "spectacle": 0,
+  "spectacle_names": [],
+  "cjk": 0,
+  "protagonist": "林砚",
+  "shot_plan": {
+    "shots": [
+      {
+        "no": 1,
+        "scene": "1-1",
+        "subject": "林砚",
+        "subject_type": "protagonist",
+        "relation": "P",
+        "anchor": "action",
+        "purpose": "建立主角与空间"
+      }
+    ],
+    "stats": {
+      "total": 1,
+      "p": 1,
+      "r": 0,
+      "n": 0,
+      "related_ratio": 1.0,
+      "protagonist_ratio": 1.0,
+      "n_ratio": 0.0,
+      "max_n_run": 0,
+      "max_support_run": 0,
+      "scene_missing": [],
+      "closeup_share": 0.0,
+      "anchor_variety": 1
+    }
+  }
+}
+```
 3. `work/report/epNN_production_notes.md`：制作说明文件，格式如下（执行剧本格式与内容完全不变，所有说明只写入此文件）：
 
 ```markdown
@@ -68,11 +122,14 @@ permissions:
 ## 修复结果
 （来自 work/preflight/optimized/epNN.json 的 items 字段；逐条列出 must_fix 和 suspected 各自的处理情况：修复判断、修改内容；suspected 若无法确认方向则注明”无法确认，保留原文”）
 
+## 主角镜头规划
+（列出本集 P/R/N 数量、关联占比、主角本人镜占比、最长 N 段、最长配角互动段、主角特写占比、关联点类型；若某场无主角在场，注明按 N 处理，不新增主角）
+
 ## 台词保留确认
 （若本集有英文台词字数不合格，注明”原台词已原样保留炼本，未做修改”；否则省略此节）
 ```
 
-## 第四步：回复
+## 第五步：回复
 
 只允许一行：`EPnn OK atoms=R/S spectacle=C`；若失败：`EPnn FAILED: 原因`。禁止输出正文或其他内容。
 
@@ -149,6 +206,8 @@ LIN YAN (DIALOGUE, voice lowered, tail held back, brow tightening, eyelids lower
 - 不改台词文字、VO/OS 文字、场景头、出场人物行、音效标签、SOURCE 明确镜头指令任一字或标点；不新增、删除或推断台词标签，不把场景描述变成人物 VO。
 - 文化背景/地域/时代以 SOURCE 为唯一依据；不得添加 SOURCE 未建立的中式元素、背景、器物、服饰、礼仪、称谓、节庆、文字、货币等；不得从“夹/端/递”等中文动词反推筷子、筷架等器物；SPECTACLE 命名也不得引入文化礼仪概念。
 - 每句台词（中文对白/VO/OS、英文 DIALOGUE/VO/OS）括号内的表演提示**必须填写，不得为空**；按「台词括号表演提示规范（强制）」执行：须包含声音/气息/情绪状态 + 至少一个可拍的面部、眼部、下颌、喉部或手部细节；情绪落点句至少 2 个可见细节；禁用"正常""平静""自然""复杂""深邃"等无信息词；禁止把完整动作链塞进括号。英文台词括号内用英文标注（示例：`DIALOGUE, voice tight, brow furrowed, suppressing anger`）；VO/OS 须标注声音质感和情绪状态。
+- 每集必须先做主角镜头规划，再写正文；主角关联镜 `(P+R)/total` ≥70%、主角本人镜 `P/total` ≥35%、纯 N 镜 ≤30%、连续 N 镜 ≤2、连续配角互动 N 镜 ≤2；有主角在场的场次至少 1 个 P/R；`shot_plan.shots` 数量必须等于正文镜头块数量；不得用主角站背景凑数。
+- 主角只使用 `work/meta/protagonist.json` 自动识别的单主角；不做双主角、不做客串集主角替换。
 - 不新增剧情、决定、能力、伤势、道具功能、角色、关系结论；不得把非自愿事实改写为自愿。
 - 每个叙事原子的 ACTION / RECEIVE / HANDOFF 三层必须在正文中可读；每个 △ 原子不得退化成剧情梗概。
 - 表演必须真人可执行（仿真人制作）：不写双眼发光、脸蛋通红、周身发光等不可演 / 特效化表情，不用抽象、诗化、心象化比喻代替可拍行为；无必要不写不易理解或无法表演的表情描写。

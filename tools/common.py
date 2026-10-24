@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+SCENE_HEADER_RE = re.compile(r"^\d+\s*[-－]\s*\d+\s")
+
 
 def read_text(path):
     return Path(path).read_text(encoding="utf-8-sig")
@@ -26,6 +28,13 @@ def load_json(path, default=None):
     if not p.exists():
         return default
     return json.loads(p.read_text(encoding="utf-8-sig"))
+
+
+def load_json_safe(path, default=None):
+    try:
+        return load_json(path, default)
+    except (OSError, ValueError, TypeError):
+        return default
 
 
 def save_json(path, obj):
@@ -372,6 +381,41 @@ def speaker_name(prefix):
     return re.split(r"[（(]", prefix, 1)[0].strip()
 
 
+def cast_names(line):
+    """Parse a 人物/出场人物 line into names."""
+    m = re.match(r"^(?:人物|出场人物)\s*[：:]\s*(.*)$", normalize_line(line))
+    if not m:
+        return []
+    return [x.strip() for x in re.split(r"[\s、，,/／]+", m.group(1)) if x.strip()]
+
+
+def dialogue_speaker(line):
+    """Return the speaker of a labelled dialogue line, else None."""
+    s = normalize_line(line)
+    if not s or s.startswith("△") or is_structural_line(s):
+        return None
+    pair = split_speaker(s)
+    if not pair:
+        return None
+    prefix = pair[0]
+    if not detect_tag(prefix):
+        return None
+    return speaker_name(prefix)
+
+
+def has_name(text, names):
+    """Case-insensitive Latin word match + substring match for CJK names."""
+    for name in names or []:
+        if not name:
+            continue
+        if re.search(r"[A-Za-z]", name) and cjk_count(name) == 0:
+            if re.search(rf"(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])", text, re.I):
+                return True
+        elif name in text:
+            return True
+    return False
+
+
 def spoken_lang(s):
     """按台词正文判定语种，与说话人名/前缀无关（前缀可能是英文名或带中文标注）。"""
     sp = split_speaker(s)
@@ -677,6 +721,356 @@ def draft_docx_checks(ep, draft_text, docx_text):
     stats["cjk_draft"] = cjk_count(draft_text)
     stats["cjk_docx"] = cjk_count(docx_text)
     return fails, stats
+
+
+# ---------------------------------------------------------------------------
+# 主角镜头规划（shot_plan）：P=主角镜，R=主角关系镜，N=非主角镜。
+# ---------------------------------------------------------------------------
+SHOT_BLOCK_LINE_RE = re.compile(r"^【.+】$")
+SHOT_SKIP_PREFIXES = ("【人物站位", "【音效", "【制作", "【全局")
+SHOT_SUBJECT_TYPES = {"protagonist", "support", "environment", "prop", "spectacle"}
+SHOT_ANCHOR_P = {"face", "eyes", "body", "action", "hand", "pov", "voice", "reaction", "decision"}
+SHOT_ANCHOR_R = {"pov", "ots", "foreground", "frame", "observe", "object", "hand",
+                 "voice", "reaction", "cause", "sound", "reflection", "shadow"}
+SHOT_ANCHOR_N = {"none"}
+SHOT_ANCHOR_MARKERS = {
+    "pov": ("POV", "主观", "视点", "第一视角"),
+    "ots": ("过肩", "肩后", "前景肩"),
+    "foreground": ("前景", "画左前", "画右前", "虚焦前景", "前虚"),
+    "frame": ("门框", "窗框", "画框", "框内", "缝隙", "门缝", "窗格"),
+    "observe": ("看着", "望向", "注视", "观察", "视线", "盯"),
+    "object": ("手", "指", "物件", "道具", "手机", "照片", "信", "刀", "杯", "钥匙", "门把"),
+    "hand": ("手", "指", "掌", "腕"),
+    "voice": ("VO", "OS", "画外", "旁白", "内心"),
+    "reaction": ("反应", "脸色", "眼神", "呼吸", "下颌", "喉结", "眉", "眼睑", "嘴角"),
+    "cause": ("因为", "于是", "随即", "下一刻", "话音", "动作", "反手", "回头"),
+    "sound": ("脚步", "呼吸", "敲", "响", "声音", "闷响", "摩擦"),
+    "reflection": ("反光", "倒影", "玻璃", "水面", "镜面"),
+    "shadow": ("影子", "阴影", "投在"),
+}
+SHOT_DEFAULTS = {
+    "related_ratio_min": 0.70,
+    "related_ratio_target": 0.80,
+    "protagonist_share_min": 0.35,
+    "n_ratio_max": 0.30,
+    "n_run_max": 2,
+    "support_run_max": 2,
+    "protagonist_closeup_share_min": 0.30,
+    "anchor_variety_min": 3,
+    "observe_share_max": 0.30,
+    "anchor_missing_max": 0.20,
+}
+
+
+def blocked_episode_numbers():
+    """Preflight protagonist blocks, independent of progress.json."""
+    data = load_json_safe(ROOT / "work" / "preflight" / "protagonist.json", {}) or {}
+    if not isinstance(data, dict):
+        data = {}
+    out = []
+    for value in data.get("blocked_eps") or []:
+        try:
+            out.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def load_shot_profile():
+    data = load_json_safe(ROOT / "shot-profile.json", {}) or {}
+    if not isinstance(data, dict):
+        data = {}
+    prof = dict(SHOT_DEFAULTS)
+    for key, value in (data.get("shots") or {}).items():
+        if key in prof:
+            prof[key] = value
+    prof["enabled"] = bool(data.get("enabled", True))
+    prof["mode"] = str(data.get("mode", "warn"))
+    return prof
+
+
+def scene_blocks(lines):
+    starts = [i for i, line in enumerate(lines) if SCENE_HEADER_RE.match(line)]
+    if not starts:
+        return [{"scene": "1-1", "lines": lines}]
+    out = []
+    for k, start in enumerate(starts):
+        end = starts[k + 1] if k + 1 < len(starts) else len(lines)
+        scene = normalize_line(lines[start]).split(" ", 1)[0]
+        out.append({"scene": scene, "lines": lines[start:end]})
+    return out
+
+
+def scene_protagonist_map(src_text, names):
+    lines = [normalize_line(x) for x in (src_text or "").split("\n") if normalize_line(x)]
+    out = []
+    for block in scene_blocks(lines):
+        evidence = set()
+        for line in block["lines"]:
+            if line.startswith("△") and has_name(line, names):
+                evidence.add("△")
+            for name in cast_names(line):
+                if has_name(name, names):
+                    evidence.add("人物")
+            speaker = dialogue_speaker(line)
+            if speaker and has_name(speaker, names):
+                pair = split_speaker(line)
+                tag = detect_tag(pair[0]) if pair else None
+                evidence.add(tag or "对白")
+        out.append({
+            "scene": block["scene"],
+            "has_protagonist": bool(evidence),
+            "evidence": sorted(evidence),
+        })
+    return out
+
+
+def draft_shots(draft_text):
+    """Split a draft into shot segments. One 【...】 block (excluding metadata) = one shot."""
+    lines = [normalize_line(x) for x in (draft_text or "").split("\n") if normalize_line(x)]
+    shots = []
+    scene = "1-1"
+    current = None
+    for line in lines:
+        if SCENE_HEADER_RE.match(line):
+            if current is not None:
+                shots.append(current)
+                current = None
+            scene = line.split(" ", 1)[0]
+            continue
+        if SHOT_BLOCK_LINE_RE.match(line) and not line.startswith(SHOT_SKIP_PREFIXES):
+            if current is not None:
+                shots.append(current)
+            current = {"header": line, "scene": scene, "lines": [line]}
+            continue
+        if current is not None:
+            current["lines"].append(line)
+    if current is not None:
+        shots.append(current)
+
+    for shot in shots:
+        visual, prefixes = [], []
+        for line in shot["lines"]:
+            if line.startswith("【") or line.startswith("△"):
+                visual.append(line)
+            else:
+                pair = split_speaker(line)
+                if pair:
+                    prefixes.append(pair[0])
+        shot["visual_text"] = "\n".join(visual)
+        shot["prefix_text"] = "\n".join(prefixes)
+    return shots
+
+
+def _episode_scene_map(ep, src_text, names):
+    data = load_json_safe(ROOT / "work" / "preflight" / "protagonist.json", {}) or {}
+    if not isinstance(data, dict):
+        data = {}
+    for rec in data.get("episodes") or []:
+        try:
+            if int(rec.get("ep", -1)) == int(ep) and rec.get("scene_map"):
+                return rec["scene_map"]
+        except (TypeError, ValueError):
+            continue
+    return scene_protagonist_map(src_text, names)
+
+
+def protagonist_shot_errors(ep, src_text, draft_text, report):
+    """Validate work/report/epNN.json#shot_plan against the draft shots.
+
+    Returns (fails, warns, stats). Hard failures are only emitted when
+    shot-profile.json mode == "enforce"; in "warn" mode everything is a warning.
+    """
+    prof = load_shot_profile()
+    if not prof.get("enabled"):
+        return [], [], {}
+    if not isinstance(report, dict):
+        report = {}
+
+    enforce = prof.get("mode") == "enforce"
+    fails, warns = [], []
+
+    def add(message, when=True, hard=False):
+        if not when:
+            return
+        if hard and enforce:
+            fails.append(message)
+        else:
+            warns.append(message if message.startswith("shot:") else "shot:" + message)
+
+    protagonist = load_json_safe(ROOT / "work" / "meta" / "protagonist.json", {}) or {}
+    if not isinstance(protagonist, dict):
+        protagonist = {}
+    names = [protagonist.get("protagonist", "")]
+    names.extend(protagonist.get("aliases") or [])
+    names = [x for x in names if x]
+    if not names:
+        add("protagonist_profile_missing", hard=True)
+        return fails, warns, {}
+
+    plan = (report or {}).get("shot_plan") or {}
+    plan_shots = plan.get("shots")
+    draft = draft_shots(draft_text)
+    if not isinstance(plan_shots, list) or not plan_shots:
+        add("protagonist_plan_missing", hard=True)
+        return fails, warns, {"shot_total": len(draft)}
+
+    if len(plan_shots) != len(draft):
+        add(f"protagonist_shot_count_mismatch:{len(plan_shots)}/{len(draft)}", hard=True)
+
+    normalized = []
+    for i, item in enumerate(plan_shots):
+        if not isinstance(item, dict):
+            add(f"protagonist_plan_invalid:shot{i + 1}", hard=True)
+            continue
+        relation = str(item.get("relation", "")).strip().upper()
+        anchor = str(item.get("anchor", "")).strip().lower()
+        subject_type = str(item.get("subject_type", "")).strip().lower()
+        if relation not in ("P", "R", "N"):
+            add(f"protagonist_plan_invalid:shot{i + 1}:relation={relation}", hard=True)
+            continue
+        if subject_type not in SHOT_SUBJECT_TYPES:
+            add(f"protagonist_plan_invalid:shot{i + 1}:subject_type={subject_type}", hard=True)
+            continue
+        allowed = SHOT_ANCHOR_P if relation == "P" else (
+            SHOT_ANCHOR_R if relation == "R" else SHOT_ANCHOR_N)
+        if anchor not in allowed:
+            add(f"protagonist_plan_invalid:shot{i + 1}:anchor={anchor}", hard=True)
+            continue
+        try:
+            no = int(item.get("no"))
+        except (TypeError, ValueError):
+            no = -1
+        if no != i + 1:
+            add(f"protagonist_plan_invalid:shot{i + 1}:no={item.get('no')}", hard=True)
+        normalized.append({
+            "no": i + 1,
+            "scene": str(item.get("scene", "")).strip(),
+            "subject_type": subject_type,
+            "relation": relation,
+            "anchor": anchor,
+        })
+
+    total = len(normalized)
+    if not total:
+        add("protagonist_plan_empty", hard=True)
+        return fails, warns, {"shot_total": len(draft)}
+
+    p = sum(1 for x in normalized if x["relation"] == "P")
+    r = sum(1 for x in normalized if x["relation"] == "R")
+    n = sum(1 for x in normalized if x["relation"] == "N")
+    related = p + r
+    related_ratio = related / total
+    protagonist_ratio = p / total
+    n_ratio = n / total
+
+    max_n_run = cur_n = 0
+    max_support_run = cur_support = 0
+    for item in normalized:
+        if item["relation"] == "N":
+            cur_n += 1
+            max_n_run = max(max_n_run, cur_n)
+            if item["subject_type"] == "support":
+                cur_support += 1
+                max_support_run = max(max_support_run, cur_support)
+            else:
+                cur_support = 0
+        else:
+            cur_n = 0
+            cur_support = 0
+
+    plan_scenes = {}
+    for item in normalized:
+        if item["relation"] in ("P", "R") and item["scene"]:
+            plan_scenes[item["scene"]] = plan_scenes.get(item["scene"], 0) + 1
+    scene_map = _episode_scene_map(ep, src_text, names)
+    scene_missing = [s["scene"] for s in scene_map
+                     if s.get("has_protagonist") and plan_scenes.get(s["scene"], 0) == 0]
+
+    closeup_total = 0
+    p_closeup = 0
+    for shot, item in zip(draft, normalized):
+        header = shot["header"]
+        if "特写" in header or "近景" in header:
+            closeup_total += 1
+            if item["relation"] == "P":
+                p_closeup += 1
+    closeup_share = p_closeup / closeup_total if closeup_total else 0.0
+
+    anchor_missing = []
+    for i, (shot, item) in enumerate(zip(draft, normalized)):
+        if item["relation"] == "N":
+            continue
+        visual = shot["visual_text"]
+        prefix = shot["prefix_text"]
+        joined = visual + "\n" + prefix
+        name_visual = has_name(visual, names)
+        name_prefix = has_name(prefix, names)
+        anchor = item["anchor"]
+        markers = SHOT_ANCHOR_MARKERS.get(anchor, ())
+        marker = any(m.lower() in joined.lower() for m in markers)
+        if item["relation"] == "P":
+            if anchor in ("pov", "voice"):
+                ok = marker
+            else:
+                ok = name_visual
+        elif anchor == "voice":
+            ok = ((name_prefix and any(m in prefix for m in ("VO", "OS", "画外", "旁白", "内心")))
+                  or (name_visual and any(m in visual for m in ("VO", "OS", "画外", "旁白", "内心"))))
+        elif anchor == "pov":
+            ok = marker
+        else:
+            ok = name_visual and marker
+        if not ok:
+            anchor_missing.append(f"S{i + 1}:{anchor}")
+
+    anchors = {x["anchor"] for x in normalized if x["relation"] in ("P", "R") and x["anchor"]}
+    anchor_variety = len(anchors)
+    observe_share = (sum(1 for x in normalized
+                         if x["relation"] == "R" and x["anchor"] == "observe") / related
+                     if related else 0.0)
+
+    add(f"protagonist_ratio_low:{related_ratio:.2f}/{prof['related_ratio_min']}",
+        related_ratio < prof["related_ratio_min"], hard=True)
+    if prof["related_ratio_target"] and related_ratio < prof["related_ratio_target"]:
+        add(f"protagonist_ratio_below_target:{related_ratio:.2f}/{prof['related_ratio_target']}")
+    add(f"protagonist_share_low:{protagonist_ratio:.2f}/{prof['protagonist_share_min']}",
+        protagonist_ratio < prof["protagonist_share_min"], hard=True)
+    add(f"protagonist_n_ratio_high:{n_ratio:.2f}/{prof['n_ratio_max']}",
+        n_ratio > prof["n_ratio_max"], hard=True)
+    add(f"protagonist_n_run:{max_n_run}/{prof['n_run_max']}",
+        max_n_run > prof["n_run_max"], hard=True)
+    add(f"protagonist_support_run:{max_support_run}/{prof['support_run_max']}",
+        max_support_run > prof["support_run_max"], hard=True)
+    if scene_missing:
+        add(f"protagonist_scene_missing:{','.join(scene_missing[:4])}", hard=True)
+    if closeup_total:
+        add(f"protagonist_closeup_low:{closeup_share:.2f}/{prof['protagonist_closeup_share_min']}",
+            closeup_share < prof["protagonist_closeup_share_min"])
+    add(f"protagonist_anchor_variety:{anchor_variety}/{prof['anchor_variety_min']}",
+        anchor_variety < prof["anchor_variety_min"])
+    add(f"protagonist_observe_high:{observe_share:.2f}/{prof['observe_share_max']}",
+        observe_share > prof["observe_share_max"])
+    if related and len(anchor_missing) / related > prof["anchor_missing_max"]:
+        add(f"protagonist_anchor_missing:{len(anchor_missing)}/{related}:"
+            + ",".join(anchor_missing[:4]))
+
+    stats = {
+        "shot_total": total,
+        "shot_p": p,
+        "shot_r": r,
+        "shot_n": n,
+        "shot_related_ratio": round(related_ratio, 3),
+        "shot_protagonist_ratio": round(protagonist_ratio, 3),
+        "shot_n_ratio": round(n_ratio, 3),
+        "shot_max_n_run": max_n_run,
+        "shot_max_support_run": max_support_run,
+        "shot_closeup_share": round(closeup_share, 3),
+        "shot_anchor_variety": anchor_variety,
+        "shot_scene_missing": scene_missing,
+        "shot_anchor_missing": anchor_missing[:8],
+    }
+    return fails, warns, stats
 
 
 def core_checks(ep, src_text, draft_text):

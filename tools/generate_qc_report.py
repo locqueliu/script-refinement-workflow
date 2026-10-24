@@ -64,7 +64,7 @@ def check_refined(root: Path, eps):
     for n in eps:
         sp = root / "work" / "source" / f"ep{n:02d}.md"
         dp = root / "work" / "draft" / f"ep{n:02d}.md"
-        if not sp.exists() or not dp.exists():
+        if not sp.exists() or not dp.exists() or not C.read_text(dp).strip():
             out[n] = {"status": "SKIP", "detail": "未执行炼本"}
             continue
         a, b = spoken_stream(sp), spoken_stream(dp)
@@ -81,9 +81,18 @@ def cell(s):
     return str(s).replace("|", "｜").replace("\n", " ").strip()
 
 
-def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, culture=None, punctuation=None):
+def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, culture=None,
+                   punctuation=None, protagonist=None, shot_plans=None, shot_issues=None):
     culture = culture or []
     punctuation = punctuation or []
+    protagonist = protagonist if isinstance(protagonist, dict) else {}
+    shot_plans = shot_plans or {}
+    shot_issues = shot_issues or {}
+    prot_eps = [e for e in (protagonist.get("episodes") or []) if isinstance(e, dict) and "ep" in e]
+    prot_map = {int(e["ep"]): e for e in prot_eps}
+    blocked_eps = [int(e["ep"]) for e in prot_eps
+                   if e.get("status") in ("NO_PROTAGONIST", "LOW_PROTAGONIST")
+                   and not e.get("entered")]
     lines = [f"# 《{stem}》质检报告", "",
              f"- 生成时间：{datetime.datetime.now().isoformat(timespec='seconds')}",
              f"- 集数：{len(eps)}", ""]
@@ -124,6 +133,25 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
         lines.append(f"| 文化背景审查（信息项，SOURCE 唯一依据） | must_fix {len(culture_must)} 项；suspected {len(culture_sus)} 项；涉及 {len(culture_eps)} 集（明细见第五节）|")
     else:
         lines.append("| 文化背景审查（信息项，SOURCE 唯一依据） | 未执行或未命中 |")
+    if protagonist:
+        if blocked_eps:
+            lines.append(f"| 主角覆盖（前置硬门槛） | blocked {len(blocked_eps)} 集：{'、'.join(f'EP{n:02d}' for n in blocked_eps)}（不进入炼本，明细见第七节）|")
+        else:
+            lines.append("| 主角覆盖（前置硬门槛） | 无 blocked 集 |")
+    else:
+        lines.append("| 主角覆盖（前置硬门槛） | 未执行 |")
+    planned = [n for n in eps if shot_plans.get(n)]
+    low_related = []
+    for n in planned:
+        try:
+            if float(shot_plans[n].get("shot_related_ratio", 1.0)) < 0.70:
+                low_related.append(n)
+        except (TypeError, ValueError):
+            continue
+    if planned:
+        lines.append(f"| 主角镜头规划（炼本阶段） | 已规划 {len(planned)}/{len(eps)} 集；关联占比 <70% 共 {len(low_related)} 集（明细见第八节）|")
+    else:
+        lines.append("| 主角镜头规划（炼本阶段） | 未规划或未执行炼本 |")
     if punct:
         lines.append(f"| 英文台词标点审查（信息项，只报告） | must_fix {sum(r.get('count', 1) for r in punct_must)} 项；warn {sum(r.get('count', 1) for r in punct_warn)} 项；涉及 {len(punct_eps)} 集（明细见第六节）|")
     else:
@@ -288,7 +316,64 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
     else:
         lines += ["未执行英文台词标点检查，或未发现问题。", ""]
 
-    lines += ["## 七、结论", ""]
+    lines += ["## 七、主角覆盖与未进入炼本", ""]
+    if prot_eps:
+        lines += [
+            "说明：主角覆盖检查是**前置硬门槛**，只在前置阶段判定；已进入炼本的集不回判。",
+            "`NO_PROTAGONIST` / `LOW_PROTAGONIST` 集标记为 blocked，不进入炼本。",
+            "",
+            "| 集 | 场次 | 主角场次 | 场次占比 | 主角台词/总台词 | 台词占比 | 覆盖分 | 状态 | 处理 |",
+            "|---|---:|---:|---:|---:|---:|---:|---|---|",
+        ]
+        for n in eps:
+            r = prot_map.get(n)
+            if not r:
+                lines.append(f"| EP{n:02d} | — | — | — | — | — | — | 未检查 | — |")
+                continue
+            status = r.get("status", "—")
+            entered = bool(r.get("entered"))
+            blocked = status in ("NO_PROTAGONIST", "LOW_PROTAGONIST") and not entered
+            if blocked:
+                action = "blocked，不进入炼本"
+            elif entered:
+                action = "已进入炼本，不回判"
+            elif status == "BORDERLINE":
+                action = "提示，可进入炼本"
+            else:
+                action = "正常进入炼本"
+            lines.append(
+                f"| EP{n:02d} | {r.get('scenes', '—')} | {r.get('protagonist_scenes', '—')} | "
+                f"{r.get('scene_ratio', '—')} | {r.get('protagonist_dialogue_lines', '—')}/"
+                f"{r.get('dialogue_lines', '—')} | {r.get('dialogue_ratio', '—')} | "
+                f"{r.get('coverage_score', '—')} | {status} | {action} |")
+        if blocked_eps:
+            lines += ["", f"- blocked 集：{'、'.join(f'EP{n:02d}' for n in blocked_eps)}；需修改源稿后重跑 `/前置检查`。"]
+        lines.append("")
+    else:
+        lines += ["未执行主角覆盖检查，或 `work/preflight/protagonist.json` 不存在。", ""]
+
+    lines += ["## 八、主角镜头规划", "",
+              "说明：`shot_plan` 由 `work/report/epNN.json` 提供；P=主角镜，R=主角关系镜，N=非主角镜。",
+              "目标：关联占比 ≥70%，主角本人镜 ≥35%，纯 N ≤30%，连续 N ≤2，连续配角互动 N ≤2。",
+              "",
+              "| 集 | 镜头 | P | R | N | 关联占比 | 主角占比 | 最长N段 | 最长配角段 | 主角特写 | 场次缺失 | 校验 |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|"]
+    for n in eps:
+        s = shot_plans.get(n) or {}
+        if not s:
+            lines.append(f"| EP{n:02d} | — | — | — | — | — | — | — | — | — | — | 未规划 |")
+            continue
+        issues = [str(x) for x in (shot_issues.get(n) or [])][:3]
+        issue_text = cell("; ".join(issues)) if issues else "OK"
+        missing = s.get("shot_scene_missing") or []
+        lines.append(
+            f"| EP{n:02d} | {s.get('shot_total', '—')} | {s.get('shot_p', '—')} | "
+            f"{s.get('shot_r', '—')} | {s.get('shot_n', '—')} | "
+            f"{s.get('shot_related_ratio', '—')} | {s.get('shot_protagonist_ratio', '—')} | "
+            f"{s.get('shot_max_n_run', '—')} | {s.get('shot_max_support_run', '—')} | "
+            f"{s.get('shot_closeup_share', '—')} | {','.join(missing) if missing else '—'} | {issue_text} |")
+    lines.append("")
+    lines += ["## 九、结论", ""]
     if not fix_eps and not pre_fail and not post_fail:
         lines.append("- 剧情：无较大剧情修改，仅动作丰富与格式整理。")
     elif fix_eps:
@@ -313,6 +398,10 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
         lines.append(f"- 台词：检测到变动集（前置：{pre_fail or '无'}；炼本：{post_fail or '无'}），请人工复核对应明细。")
     else:
         lines.append("- 台词：全部阶段逐字锁定，无变动。")
+    if blocked_eps:
+        lines.append(f"- 主角覆盖：{'、'.join(f'EP{n:02d}' for n in blocked_eps)} 未进入炼本（主角戏份不足），需修改源稿后重跑 `/前置检查`。")
+    elif protagonist:
+        lines.append("- 主角覆盖：无 blocked 集。")
     if has_draft:
         if over_eps:
             lines.append(f"- 字数：{'、'.join(f'EP{n:02d}' for n in over_eps)} 超出单集上限 {MAX_DRAFT_CJK} 字，请核查。")
@@ -462,8 +551,30 @@ def main() -> int:
     culture = culture_data.get("results", []) or []
     punct_data = C.load_json(root / "work" / "preflight" / "punctuation.json", {}) or {}
     punctuation = punct_data.get("results", []) or []
+    protagonist = C.load_json(root / "work" / "preflight" / "protagonist.json", {}) or {}
+    if not isinstance(protagonist, dict):
+        protagonist = {}
+    for rec in protagonist.get("episodes") or []:
+        if not isinstance(rec, dict) or "ep" not in rec or "entered" in rec:
+            continue
+        try:
+            n = int(rec["ep"])
+        except (TypeError, ValueError):
+            continue
+        draft = root / "work" / "draft" / f"ep{n:02d}.md"
+        rec["entered"] = draft.exists() and draft.stat().st_size > 0
 
-    md = build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing, culture, punctuation)
+    shot_plans, shot_issues = {}, {}
+    for n in eps:
+        rec = C.load_json(root / "work" / "report" / f"ep{n:02d}.json", {}) or {}
+        check = C.load_json(root / "work" / "report" / f"check_ep{n:02d}.json", {}) or {}
+        stats = check.get("stats") or ((rec.get("shot_plan") or {}).get("stats") or {})
+        shot_plans[n] = stats if any(str(k).startswith("shot_") for k in stats) else {}
+        shot_issues[n] = [x for x in (check.get("fails") or []) + (check.get("warns") or [])
+                          if "protagonist" in str(x) or str(x).startswith("shot:")]
+
+    md = build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing, culture,
+                        punctuation, protagonist, shot_plans, shot_issues)
     out_dir = Path(args.out_dir) if args.out_dir else (root / "output")
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / f"{stem}_质检报告.md"

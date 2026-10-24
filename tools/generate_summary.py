@@ -68,7 +68,15 @@ def main():
 
     passed     = [n for n in eps if ep_statuses.get(n, {}).get("status") == "passed"]
     issues     = [n for n in eps if ep_statuses.get(n, {}).get("status") == "passed-with-issues"]
-    not_passed = [n for n in eps if ep_statuses.get(n, {}).get("status") not in ("passed", "passed-with-issues")]
+    eps_set = set(eps)
+    blocked_set = {n for n in eps if ep_statuses.get(n, {}).get("status") == "blocked"}
+    blocked_set.update(n for n in C.blocked_episode_numbers() if n in eps_set)
+    blocked_set = {n for n in blocked_set
+                   if ep_statuses.get(n, {}).get("status")
+                   not in ("passed", "passed-with-issues")}
+    blocked    = [n for n in eps if n in blocked_set]
+    not_passed = [n for n in eps if ep_statuses.get(n, {}).get("status")
+                  not in ("passed", "passed-with-issues", "blocked") and n not in blocked_set]
 
     out = []
 
@@ -83,6 +91,7 @@ def main():
     out.append("|------|:----:|------|\n")
     out.append(f"| 通过 | {len(passed)} | {', '.join(f'EP{n:02d}' for n in passed) or '—'} |\n")
     out.append(f"| 降级通过（含问题） | {len(issues)} | {', '.join(f'EP{n:02d}' for n in issues) or '—'} |\n")
+    out.append(f"| blocked（主角覆盖不足，不进入炼本） | {len(blocked)} | {', '.join(f'EP{n:02d}' for n in blocked) or '—'} |\n")
     out.append(f"| 未通过 | {len(not_passed)} | {', '.join(f'EP{n:02d}' for n in not_passed) or '—'} |\n\n")
 
     # ── Pre-flight report summary ────────────────────────────────────────────
@@ -127,6 +136,26 @@ def main():
     else:
         out.append("### 疑似问题处理（suspected）\n\n_无疑似问题处理记录_\n\n")
 
+    # ── Blocked episodes (preflight protagonist coverage) ────────────────────
+    if blocked:
+        prot = C.load_json_safe(root / "work" / "preflight" / "protagonist.json", {}) or {}
+        if not isinstance(prot, dict):
+            prot = {}
+        prot_map = {int(e["ep"]): e for e in (prot.get("episodes") or [])
+                    if isinstance(e, dict) and "ep" in e}
+        out.append("## blocked 集（未进入炼本）\n\n")
+        out.append("以下集在前置主角覆盖检查中判定为主角戏份不足，未进入炼本；需修改源稿后重跑 `/前置检查`。\n\n")
+        out.append("| 集号 | 场次占比 | 台词占比 | 覆盖分 | 原因 |\n")
+        out.append("|---|---:|---:|---:|---|\n")
+        for n in blocked:
+            r = prot_map.get(n, {})
+            reason = str(r.get("reason", "")).replace("|", "｜").replace("\n", " ")
+            out.append(f"| EP{n:02d} | {r.get('scene_ratio', '—')} | {r.get('dialogue_ratio', '—')} | "
+                       f"{r.get('coverage_score', '—')} | {reason or '主角戏份不足'} |\n")
+        out.append("\n")
+    else:
+        out.append("## blocked 集（未进入炼本）\n\n_无_\n\n")
+
     # ── Per-episode production notes ─────────────────────────────────────────
     out.append("## 各集炼本修改优化说明\n\n")
     for n in eps:
@@ -161,8 +190,8 @@ def main():
 
     repair_count = len(rows)
     print(f"[OK] production_summary.md written — "
-          f"{len(eps)} eps | passed={len(passed)} issues={len(issues)} failed={len(not_passed)} "
-          f"repair_items={repair_count}")
+          f"{len(eps)} eps | passed={len(passed)} issues={len(issues)} "
+          f"blocked={len(blocked)} failed={len(not_passed)} repair_items={repair_count}")
     return 0
 
 
