@@ -184,6 +184,8 @@ def check_ep(ep, profile):
     g_lo, g_hi = int(profile["groups_per_ep"][0]), int(profile["groups_per_ep"][1])
     s_lo, s_hi = int(profile["shots_per_ep"][0]), int(profile["shots_per_ep"][1])
     c_lo, c_hi = int(profile["cjk_per_ep"][0]), int(profile["cjk_per_ep"][1])
+    t_target = int(profile.get("total_chars_target", 9000))
+    t_hi = int(profile.get("total_chars_per_ep", 10000))
     if len(groups) > g_hi:
         fails.append(f"分镜组数 {len(groups)} 超出目标上限 {g_hi}（150s 是上限，不是目标）")
     elif len(groups) < g_lo:
@@ -196,6 +198,11 @@ def check_ep(ep, profile):
         fails.append(f"中文字数 {cjk} 超出目标上限 {c_hi}，需压缩重复动作/修饰")
     elif cjk < c_lo:
         warns.append(f"中文字数 {cjk} 低于目标下限 {c_lo}")
+    total = C.total_char_count(ep.get("source_text") or "\n".join(ep["raw"]))
+    if total > t_hi:
+        fails.append(f"单集总字符数 {total} 超出硬上限 {t_hi}（含标点/空格/换行），必须打回压缩")
+    elif total > t_target:
+        warns.append(f"单集总字符数 {total} 超过目标 {t_target}，建议压缩")
     if total_dur > float(profile.get("episode_warn_above", 145.0)):
         warns.append(f"单集时长 {round(total_dur, 1)}s 贴近 150s 上限，确认是否必要")
     return fails, warns
@@ -336,7 +343,12 @@ def main():
 
     episodes = []
     for p in files:
-        episodes.extend(parse(read_lines(p), profile))
+        eps = parse(read_lines(p), profile)
+        if p.suffix.lower() != ".docx":
+            raw_text = C.read_text(p)
+            for ep in eps:
+                ep["source_text"] = raw_text
+        episodes.extend(eps)
     if not episodes:
         print("[FAIL] 未解析到任何集")
         return 2
@@ -349,11 +361,12 @@ def main():
         groups = ep["groups"]
         shots = sum(len(g["shots"]) for g in groups)
         cjk = C.cjk_count("\n".join(ep["raw"]))
+        total = C.total_char_count(ep.get("source_text") or "\n".join(ep["raw"]))
         results.append({"ep": ep["no"], "groups": len(groups), "shots": shots,
                         "duration": round(sum(g["duration"] for g in groups), 2),
-                        "cjk": cjk, "fails": fails, "warns": warns})
+                        "cjk": cjk, "total": total, "fails": fails, "warns": warns})
         print(f"EP{ep['no']:02d} 组{len(groups)}｜镜{shots}｜{round(sum(g['duration'] for g in groups), 1)}s｜"
-              f"中文{cjk}｜失败{len(fails)}｜警告{len(warns)}")
+              f"中文{cjk}｜总字符{total}｜失败{len(fails)}｜警告{len(warns)}")
         for f in fails[:6]:
             print(f"  [FAIL] {f}")
     print(f"[{'FAIL' if total_fails else 'PASS'}] storyboard check: eps={len(results)} fails={total_fails} profile={profile_name}")

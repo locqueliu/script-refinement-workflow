@@ -342,6 +342,11 @@ def cjk_count(s):
     return len(re.findall(r"[\u4e00-\u9fff]", s))
 
 
+def total_char_count(s):
+    """总字符数口径：包含所有标点、空格与换行。"""
+    return len(s)
+
+
 def bigrams(s):
     s = s.lower()
     out = set()
@@ -368,19 +373,44 @@ def resolve_docx(root):
     return None
 
 
+_EP_HEAD_PREFIX_RES = (
+    re.compile(r"^第\s*[0-9零〇一二三四五六七八九十百两]+\s*[集话]"),
+    re.compile(r"(?i:episode|ep)\s*\d+"),
+)
+
+
+def _is_bare_episode_header(s):
+    """True when the line is only an episode header, with no title/summary after it."""
+    for pat in _EP_HEAD_PREFIX_RES:
+        m = pat.match(s)
+        if m:
+            return not s[m.end():].strip()
+    return False
+
+
 def locate_episodes(texts):
-    starts = []
-    seen = set()
+    cands = []
     for i, t in enumerate(texts):
         s = t.strip()
         n = episode_number(s)
         if n is None:
             continue
-        if n in seen:
+        cands.append((i, n, s))
+    # 前置分集大纲常写成「第N集（剧情摘要）」，与正文集标题「第N集」重号。
+    # 同号时优先采用不带标题的正文集标题行，避免正文全部被并入最后一集。
+    chosen = {}
+    for i, n, s in cands:
+        cur = chosen.get(n)
+        if cur is None:
+            chosen[n] = (i, n, s)
             continue
-        seen.add(n)
-        starts.append((i, n, s))
-    return starts
+        new_bare = _is_bare_episode_header(s)
+        cur_bare = _is_bare_episode_header(cur[2])
+        if new_bare and not cur_bare:
+            chosen[n] = (i, n, s)
+        elif new_bare and cur_bare:
+            chosen[n] = (i, n, s)
+    return sorted(chosen.values(), key=lambda x: x[0])
 
 
 QUOTE_CHARS = "「」『』“”‘’\"'"
