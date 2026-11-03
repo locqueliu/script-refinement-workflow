@@ -195,7 +195,7 @@ def check_ep(ep, profile):
     elif shots < s_lo:
         warns.append(f"镜头数 {shots} 低于目标下限 {s_lo}")
     if cjk > c_hi:
-        fails.append(f"中文字数 {cjk} 超出目标上限 {c_hi}，需压缩重复动作/修饰")
+        warns.append(f"中文字数 {cjk} 超过目标上限 {c_hi}，仅作提示，不作为失败条件")
     elif cjk < c_lo:
         warns.append(f"中文字数 {cjk} 低于目标下限 {c_lo}")
     total = C.total_char_count(ep.get("source_text") or "\n".join(ep["raw"]))
@@ -381,3 +381,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

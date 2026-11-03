@@ -61,14 +61,6 @@ def check_one(n):
     return p.returncode == 0, rec
 
 
-def force_issue_pass(n):
-    """重试超限后调用 --allow-issue-pass 降级通过，写 epNN_issue.md，返回更新后的 rec。"""
-    cmd = [sys.executable, str(C.ROOT / "tools" / "check_ep.py"),
-           "--eps", str(n), "--no-progress", "--allow-issue-pass"]
-    subprocess.run(cmd, cwd=str(C.ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace")
-    return C.load_json(C.ROOT / "work" / "report" / f"check_ep{n:02d}.json", {})
-
-
 def episode_task(n, args):
     for attempt in range(1, args.retries + 2):
         code, secs = run_worker(n, attempt, args)
@@ -79,15 +71,8 @@ def episode_task(n, args):
         C.write_text(C.ROOT / "work" / "meta" / f"retry_ep{n:02d}.txt",
                      f"ep{n:02d} attempt {attempt} failed checks:\n{fails}\n")
         print(f"[retry] ep{n:02d} attempt={attempt} exit={code} {secs}s fails={ascii_safe(fails)[:120]}", flush=True)
-    # 重试超限：尝试降级为 passed-with-issues；文化背景硬锁不可降级
-    print(f"[issue-pass] ep{n:02d} exceeded retries — attempting issue-pass", flush=True)
-    issue_rec = force_issue_pass(n)
-    if issue_rec.get("verdict") == "FAIL":
-        print(f"[culture-block] ep{n:02d} culture lock cannot be issue-passed", flush=True)
-        return {"ep": n, "result": "failed", "attempt": args.retries + 1,
-                "fails": issue_rec.get("fails", fails)}
-    return {"ep": n, "result": "passed-with-issues", "attempt": args.retries + 1,
-            "fails": fails, "issue_file": f"work/report/ep{n:02d}_issue.md"}
+    print(f"[FAIL] ep{n:02d} reached retry limit={args.retries}; leaving draft failed", flush=True)
+    return {"ep": n, "result": "failed", "attempt": args.retries + 1, "fails": fails}
 
 
 def ensure_profile(args):
@@ -146,7 +131,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--eps", default="")
     ap.add_argument("--k", type=int, default=20)
-    ap.add_argument("--retries", type=int, default=2)
+    ap.add_argument("--retries", type=int, choices=(0, 1, 2), default=2,
+                    help="重试次数上限（不含首次生成），最多2次")
     ap.add_argument("--timeout", type=int, default=1500)
     ap.add_argument("--variant", default="")
     ap.add_argument("--model", default="")
@@ -183,8 +169,7 @@ def main():
             results.append(rec)
             key = str(n)
             pe = progress["episodes"].get(key, {})
-            pe["status"] = "passed" if rec["result"] == "pass" else (
-                "passed-with-issues" if rec["result"] == "passed-with-issues" else "failed")
+            pe["status"] = "passed" if rec["result"] == "pass" else "failed"
             pe["pool_result"] = rec
             progress["episodes"][key] = pe
             progress["updated"] = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -199,3 +184,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

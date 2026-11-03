@@ -10,10 +10,11 @@ import common as C
 
 BANNED_PATTERNS = ["BGM", "bgm", "配乐", "背景音乐", "音乐", "字幕", "画面文字", "屏幕文字", "标题卡", "大字标题", "文字浮现", "浮现文字"]
 FUZZY_WORDS = ["自行发挥", "自行补充", "同上"]
-MAX_DRAFT_CJK = 10000
-# 硬失败：只保留内容损坏类（缺稿、台词缺失/错位/新增、双语错位、英文标签错误、超字数、文化背景新增）。
+MAX_DRAFT_CHARS = 10000
+TARGET_DRAFT_CHARS = 9000
+# 硬失败：总字符数超过上限仍属硬错误；thin/label_added/label_changed/scene_as_speech 降为 fmt: warn。
 # thin/label_added/label_changed/scene_as_speech 降为 fmt: warn，动作丰富后的正常格式扩展不再打回。
-BASIC_FAIL_PREFIXES = ("too_long:", "no_draft_file", "missing_in_docx", "empty_draft",
+BASIC_FAIL_PREFIXES = ("too_long_total:", "no_draft_file", "missing_in_docx", "empty_draft",
                        "missing_dialogue:", "bilingual_desync:", "spoken_order:",
                        "en_label_language:", "en_label_missing:", "added_spoken:",
                        "culture_added:")
@@ -43,8 +44,6 @@ def extra_checks(src_text, draft_text):
     drf_cjk = C.cjk_count(draft_text)
     if src_cjk and drf_cjk < 1.3 * src_cjk:
         fails.append(f"thin:{drf_cjk}/{src_cjk}")
-    if drf_cjk > MAX_DRAFT_CJK:
-        fails.append(f"too_long:{drf_cjk}/{MAX_DRAFT_CJK}")
     blocks = [i for i, x in enumerate(drf_lines) if SHOT_BLOCK_RE.match(x) and not x.startswith(SKIP_BLOCK_PREFIX)]
     if not blocks:
         fails.append("no_shot_blocks")
@@ -86,8 +85,6 @@ def main():
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--docx", default="")
     ap.add_argument("--no-progress", action="store_true")
-    ap.add_argument("--allow-issue-pass", action="store_true",
-                    help="重试超限后强制降级：即使有硬失败也标为 passed-with-issues 并写 epNN_issue.md")
     args = ap.parse_args()
     root = C.ROOT
     meta = C.load_json(root / "work" / "meta" / "ep_index.json")
@@ -127,36 +124,20 @@ def main():
                 ef, ew = extra_checks(src_text, draft_text)
                 fails += ef
                 warns += ew
-        # 硬失败只保留字数等基本问题；其余（含全部格式类）降级为 warn，不再打回。
+            stats = dict(stats or {})
+            total_chars = C.total_char_count(draft_text)
+            stats["total_chars"] = total_chars
+            if total_chars > MAX_DRAFT_CHARS:
+                fails.append(f"too_long_total:{total_chars}/{MAX_DRAFT_CHARS}")
+            elif total_chars > TARGET_DRAFT_CHARS:
+                warns.append(f"length_target:{total_chars}/{TARGET_DRAFT_CHARS}")
+        # 仅基本内容错误和总字符数超限阻断通过；其他质量项记录为 warning。
         hard = [f for f in fails if f.startswith(BASIC_FAIL_PREFIXES)]
         demoted = [f for f in fails if not f.startswith(BASIC_FAIL_PREFIXES)]
         fails = hard
         if demoted:
             warns = warns + ["fmt:" + d for d in demoted]
-        # --allow-issue-pass：重试超限降级，把硬失败转为 passed-with-issues
-        # 文化背景硬锁不可降级：culture_added 必须保持 FAIL，避免“降级通过”绕过文化锁。
-        culture_block = [f for f in fails if f.startswith("culture_added:")]
-        if args.allow_issue_pass and fails and not culture_block:
-            verdict = "PASS"
-            issue_lines = [f"# EP{n:02d} 校验未通过项（降级通过）\n",
-                           f"生成时间：{datetime.datetime.now().isoformat(timespec='seconds')}\n",
-                           "\n## 未通过的校验项\n"]
-            for f in fails:
-                issue_lines.append(f"- {f}\n")
-            issue_lines += ["\n## 说明\n",
-                            "本集在重试限制内仍未通过上述校验项，已按降级策略标记为 passed-with-issues。\n",
-                            "请人工核查上述问题后决定是否重炼。\n"]
-            issue_path = root / "work" / "report" / f"ep{n:02d}_issue.md"
-            issue_path.parent.mkdir(parents=True, exist_ok=True)
-            issue_path.write_text("".join(issue_lines), encoding="utf-8")
-            warns = warns + ["issue_pass:" + f for f in fails]
-            fails = []
-            issue_status = "passed-with-issues"
-        else:
-            verdict = "PASS" if not fails else "FAIL"
-            issue_status = None
-            if culture_block:
-                warns = warns + ["culture_block:" + f for f in culture_block]
+        verdict = "PASS" if not fails else "FAIL"
         if fails:
             overall_fail += 1
         rec = {"ep": n, "verdict": verdict, "fails": fails, "warns": warns, "stats": stats, "mode": mode}
@@ -166,12 +147,9 @@ def main():
             if not args.no_progress:
                 key = str(n)
                 pe = progress["episodes"].get(key, {})
-                if issue_status:
-                    pe["status"] = issue_status
-                else:
-                    pe["status"] = "passed" if verdict == "PASS" else "failed"
+                pe["status"] = "passed" if verdict == "PASS" else "failed"
                 pe["reasons"] = fails
-                if verdict != "PASS" and not issue_status:
+                if verdict != "PASS":
                     pe["attempts"] = int(pe.get("attempts", 0)) + 1
                 pe["checked_at"] = datetime.datetime.now().isoformat(timespec="seconds")
                 progress["episodes"][key] = pe
@@ -188,3 +166,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
