@@ -1,0 +1,59 @@
+{
+  "enabled": true,
+  "mode": "warn",
+  "protagonist": {
+    "mode": "single",
+    "names": []
+  },
+  "coverage": {
+    "min_scene_ratio": 0.4,
+    "min_dialogue_ratio": 0.2,
+    "borderline_scene_ratio": 0.55,
+    "borderline_dialogue_ratio": 0.35,
+    "borderline_coverage_score": 0.45
+  },
+  "shots": {
+    "related_ratio_min": 0.7,
+    "related_ratio_target": 0.8,
+    "protagonist_share_min": 0.35,
+    "n_ratio_max": 0.3,
+    "n_run_max": 2,
+    "support_run_max": 2,
+    "protagonist_closeup_share_min": 0.3,
+    "anchor_variety_min": 3,
+    "observe_share_max": 0.3
+  },
+  "directing": {
+    "enabled": true,
+    "image_shots_per_ep": [
+      1,
+      2
+    ],
+    "transitions_per_ep": [
+      1,
+      2
+    ],
+    "transition_jump_score_min": 3,
+    "landing": {
+      "enabled": true,
+      "group_last_min": 2.0,
+      "scene_last_min": 2.5,
+      "major_scene_total": [
+        4.0,
+        6.0
+      ],
+      "episode_hook": [
+        2.5,
+        4.0
+      ]
+    }
+  },
+  "gaze": {
+    "active": "female",
+    "modules": {
+      "female": "参考资料/分镜细则/gaze/female.md",
+      "male": "参考资料/分镜细则/gaze/male.md",
+      "neutral": "参考资料/分镜细则/gaze/neutral.md"
+    }
+  }
+}

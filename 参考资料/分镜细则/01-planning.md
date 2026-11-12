@@ -12,6 +12,10 @@
 4. `work/meta/source_dialogue.tsv`（台词台账，含无标签句）。
 5. `work/meta/facts_lock.md`、`work/meta/handoff.json`（仅本集接点）。
 6. `work/preflight/optimized/epNN.json`（本集修复记录，若有）。
+7. `shot-profile.json`（导演层配置：主角模式、P/R/N 阈值、落点/意象/过渡开关）。
+8. `work/meta/protagonist.json`（主角与别名，若存在）。
+9. `work/preflight/protagonist.json`（本集 `scene_map`：哪些场次有主角在场，若存在）。
+10. `shot-profile.json` 的 `gaze.active` 对应模块 `参考资料/分镜细则/gaze/{active}.md` 与 `05-gaze.md`（女性向/中性切换）。
 
 输出：`work/storyboard/epNN_plan.json`，结构如下：
 
@@ -19,6 +23,15 @@
 {
   "ep": 1,
   "profile": "B_bilingual_full",
+  "protagonist": {"name": "Nora", "aliases": [], "mode": "single"},
+  "marks": {
+    "landing": [
+      {"scene": "1-1", "group": 1, "shots": [1], "handoff": "sound"}
+    ],
+    "gaze_beats": [
+      {"group": 1, "shot": 1, "type": "micro_emotion", "note": "她听到名字时指尖停住"}
+    ]
+  },
   "scenes": [
     {
       "scene": "1-1",
@@ -34,6 +47,11 @@
               "no": 1,
               "start": 0.0,
               "end": 3.0,
+              "relation": "P",
+              "anchor": "action",
+              "subject": "Nora",
+              "subject_type": "protagonist",
+              "role": "story",
               "shot": "近景，右前侧，固定机位",
               "frame_range": "竖屏，Nora 胸部以上；Lina 在画外上方",
               "offscreen": "Lina 不入画",
@@ -56,6 +74,8 @@
 - `dialogue[].text` 必须是台账原文；拆分时每个片段各出现一次，按顺序拼回等于原文。
 - `label` 只用 `对白 / VO / OS`（台账中的 `O.S.` 已归一为 OS）；源无标签时留空。
 - `sid` 必填；同一 sid 可拆成多个片段，但必须连续、按序、无重复全文。
+- `relation`/`anchor`/`subject`/`subject_type` 为导演层字段：P/R/N 与锚点定义见 `03-protagonist.md`；只写 plan，不写正文。
+- `marks.landing` 每场一个，`shots` 用组内镜号；`marks.image`/`marks.transition` 只在 `shot-profile.json` 开启时填写。
 
 ## 二、规划顺序
 
@@ -73,12 +93,25 @@
    - 写 `画面范围`、`画外锁定`（有则写）、动作、反应、台词、标签；
    - 关键动作链写触发—动作—接触—结果；
    - 倾听者有可见反应；
-   - 开头/结尾用近景或特写，不用普通空镜。
+   - 开头/结尾用近景或特写，不用普通空镜（场间转场镜、新场首镜 ≤2.0 秒除外）。
 7. **台词拆分**：
    - 超长句按标点/语义边界拆到连续镜头；
    - 极短回应不拆；
    - 拆分后每片只出现一次，拼回原文。
 8. **自检**：时间求和、组/集上限、空间起点、台词覆盖、标签、无 `△/SPECTACLE/[EN]`。
+
+## 二之二、主角与功能镜规划
+
+在逐镜计划前，先做导演层规划；细节见 `03-protagonist.md` 与 `04-directing-marks.md`。
+
+1. **主角贯穿线**：读 `work/meta/protagonist.json` 与 `work/preflight/protagonist.json`，逐场写“主角要什么 → 阻力 → 决定 → 状态变化”。
+2. **先排 P**：首次揭示、决定、动作结果、情绪落点优先给主角本人。
+3. **再排 R**：配角互动段必须通过 POV/过肩/前景/框内观察/手部物件/VO/OS/反应切/因果回切/声音桥锚定主角。
+4. **最后排 N**：环境、奇观、纯配角段；连续 N ≤2，连续配角互动 N ≤2。
+5. **功能镜预算**：先留场末落点（每场 1 个，重点场 1–2 镜）；`shot-profile.json` 开启意象/过渡时再留对应预算。
+6. **自检比例**：`(P+R)/total ≥70%`、`P/total ≥35%`、`N/total ≤30%`、有主角在场场次至少 1 个 P/R；不达标先改计划。
+7. **写 marks**：`marks.landing` 必填；`marks.image` / `marks.transition` 按配置决定是否填。
+8. **写 gaze_beats**：`gaze.active=female` 时必填；每集至少 3 类、至少 1 个 `object`、1 个 `aftermath`；`group`/`shot` 必须指向真实镜头。
 
 ## 三、密度目标
 
@@ -86,8 +119,17 @@
 - 每个源 `△` 原子通常展开为 1.5—2.5 个镜头；不得把原子直接复制成镜头。
 - 150 秒是硬上限，不是目标：短集按真实内容做 80—120 秒；不要为接近 150 秒加镜、加动作或加环境描写。
 - 不为凑密度加无功能空镜、重复反应、装饰运镜。
+- 功能镜预算：每集预留 2–6 镜给场末落点/意象/过渡；超预算时先砍过渡，再砍意象，最后才动落点；不得删台词或硬锁。
+
+## 三之二、导演层硬约束
+
+- `shot-profile.json` 的 `enabled=true` 时，每个镜头必须有 `relation`（P/R/N）与 `anchor`；缺字段按 N 统计并告警。
+- 有主角在场的场次至少 1 个 P/R；连续 N ≤2；连续配角互动 N ≤2。
+- 每个场景必须有 `marks.landing`；场末最后一镜 ≥2.5 秒（重点场收束 4–6 秒）；组末最后一镜 ≥2.0 秒。
+- `image`/`transition` 只在 `directing.image_shots_per_ep` / `directing.transitions_per_ep` 开启时规划；未开启时不要加。
+- `gaze.active != neutral` 时，`marks.gaze_beats` 必填：至少 3 类、至少 1 个 `object`、1 个 `aftermath`；类型只用 `agency/micro_emotion/object/distance/aftermath/non_objectifying`。
+- P/R/N 与 marks 只写在 plan JSON，不写进成品正文。
 
 ## 四、返回
 
 只回一行：`PLAN EPnn OK groups=G shots=S dur=D`；失败回 `PLAN EPnn FAILED: 原因`。
-

@@ -1,12 +1,14 @@
 """竖屏分镜稿硬校验（0 token）。
 
 校验目标：分镜组时长、镜头时间轴、单镜/组/集上限、空间起点、声音/禁止字段、
-台词标签（含 O.S./VO/OS）、禁用旧字段与占位词。
+台词标签（含 O.S./VO/OS）、禁用旧字段与占位词；以及 shot-profile.json 开启时的
+主角 P/R/N、场末落点、意象/过渡标记和计划-成稿对账。
 
 用法：
   python tools/storyboard_check.py --docx 测试/目标稿.docx
   python tools/storyboard_check.py --dir work/storyboard
   python tools/storyboard_check.py --eps 1,2 --report-only
+  python tools/storyboard_check.py --dir work/storyboard --no-directing
 """
 import argparse
 import json
@@ -16,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common as C
+import directing_check as D
 
 GROUP_RE = re.compile(r"^分镜\s*(\d+)\s*[（(]\s*时长\s*[：:]\s*([0-9]+(?:\.[0-9]+)?)\s*秒\s*[）)]")
 GROUP_SOP_RE = re.compile(r"^分镜\s*(\d+)\s*[｜|]\s*预计\s*([0-9]+(?:\.[0-9]+)?)\s*秒")
@@ -110,7 +113,7 @@ def parse(lines, profile):
     return episodes
 
 
-def check_ep(ep, profile):
+def check_ep(ep, profile, plan=None, shot_profile=None):
     fails, warns = [], []
     tol = float(profile.get("time_tolerance", 0.06))
     groups = ep["groups"]
@@ -205,10 +208,14 @@ def check_ep(ep, profile):
         warns.append(f"单集总字符数 {total} 超过目标 {t_target}，建议压缩")
     if total_dur > float(profile.get("episode_warn_above", 145.0)):
         warns.append(f"单集时长 {round(total_dur, 1)}s 贴近 150s 上限，确认是否必要")
+    if plan and shot_profile and shot_profile.get("enabled", True):
+        df, dw = D.check_plan_draft(plan, ep, tol)
+        fails.extend(df)
+        warns.extend(dw)
     return fails, warns
 
 
-def check_plan(plan, profile):
+def check_plan(plan, profile, shot_profile=None):
     fails, warns = [], []
     tol = float(profile.get("time_tolerance", 0.06))
     ep = int(plan.get("ep") or 0)
@@ -221,7 +228,7 @@ def check_plan(plan, profile):
             groups.append(g)
     if not groups:
         fails.append("计划没有分镜组")
-        return fails, warns
+        return fails, warns, {}
     shots_total = 0
     for g in groups:
         no = g.get("no")
@@ -270,7 +277,12 @@ def check_plan(plan, profile):
         fails.append(f"计划镜头数 {shots_total} 超出目标上限 {s_hi}")
     elif shots_total < s_lo:
         warns.append(f"计划镜头数 {shots_total} 低于目标下限 {s_lo}")
-    return fails, warns
+    stats = {}
+    if shot_profile and shot_profile.get("enabled", True):
+        df, dw, stats = D.check_plan(plan, shot_profile)
+        fails.extend(df)
+        warns.extend(dw)
+    return fails, warns, stats
 
 
 def read_lines(path):
@@ -289,6 +301,8 @@ def main():
     ap.add_argument("--eps", default="")
     ap.add_argument("--profile", default=None)
     ap.add_argument("--report-only", action="store_true")
+    ap.add_argument("--no-directing", action="store_true",
+                    help="跳过主角/落点等导演层校验")
     ap.add_argument("--out", default="")
     args = ap.parse_args()
     root = C.ROOT
@@ -296,6 +310,9 @@ def main():
     if not profile_data:
         print("[FAIL] 缺少 storyboard-profile.json")
         return 2
+    shot_profile = C.load_json(root / "shot-profile.json", {}) or {}
+    if args.no_directing:
+        shot_profile = {"enabled": False}
     profile_name = args.profile or profile_data.get("active") or "B_bilingual_full"
     profile = (profile_data.get("profiles") or {}).get(profile_name)
     if not profile:
@@ -314,11 +331,13 @@ def main():
         total_fails = 0
         for p in pfiles:
             plan = C.load_json(p, {}) or {}
-            fails, warns = check_plan(plan, profile)
+            fails, warns, stats = check_plan(plan, profile, shot_profile)
             total_fails += len(fails)
             epno = int(plan.get("ep") or 0)
-            results.append({"ep": epno, "fails": fails, "warns": warns, "plan": str(p)})
-            print(f"PLAN EP{epno:02d}｜失败{len(fails)}｜警告{len(warns)}")
+            results.append({"ep": epno, "fails": fails, "warns": warns,
+                            "plan": str(p), "directing": stats})
+            print(f"PLAN EP{epno:02d}｜失败{len(fails)}｜警告{len(warns)}"
+                  + (f"｜{D.summary(stats)}" if stats else ""))
             for f in fails[:6]:
                 print(f"  [FAIL] {f}")
         print(f"[{'FAIL' if total_fails else 'PASS'}] plan check: eps={len(results)} fails={total_fails} profile={profile_name}")
@@ -342,12 +361,20 @@ def main():
         files = [p for p in files if (int(re.search(r"ep(\d+)", p.stem).group(1)) if re.search(r"ep(\d+)", p.stem) else -1) in wanted]
 
     episodes = []
+    plans = {}
     for p in files:
         eps = parse(read_lines(p), profile)
         if p.suffix.lower() != ".docx":
             raw_text = C.read_text(p)
             for ep in eps:
                 ep["source_text"] = raw_text
+            plan_path = p.with_name(p.stem + "_plan.json")
+            if plan_path.exists():
+                plan = C.load_json(plan_path, {}) or {}
+                try:
+                    plans[int(plan.get("ep") or 0)] = plan
+                except (TypeError, ValueError):
+                    pass
         episodes.extend(eps)
     if not episodes:
         print("[FAIL] 未解析到任何集")
@@ -356,17 +383,22 @@ def main():
     results = []
     total_fails = 0
     for ep in sorted(episodes, key=lambda x: x["no"]):
-        fails, warns = check_ep(ep, profile)
+        plan = plans.get(ep["no"])
+        fails, warns = check_ep(ep, profile, plan, shot_profile)
         total_fails += len(fails)
         groups = ep["groups"]
         shots = sum(len(g["shots"]) for g in groups)
         cjk = C.cjk_count("\n".join(ep["raw"]))
         total = C.total_char_count(ep.get("source_text") or "\n".join(ep["raw"]))
+        stats = (D.stats_from_plan(plan, shot_profile)
+                 if plan and shot_profile.get("enabled", True) else {})
         results.append({"ep": ep["no"], "groups": len(groups), "shots": shots,
                         "duration": round(sum(g["duration"] for g in groups), 2),
-                        "cjk": cjk, "total": total, "fails": fails, "warns": warns})
+                        "cjk": cjk, "total": total, "fails": fails, "warns": warns,
+                        "directing": stats})
         print(f"EP{ep['no']:02d} 组{len(groups)}｜镜{shots}｜{round(sum(g['duration'] for g in groups), 1)}s｜"
-              f"中文{cjk}｜总字符{total}｜失败{len(fails)}｜警告{len(warns)}")
+              f"中文{cjk}｜总字符{total}｜失败{len(fails)}｜警告{len(warns)}"
+              + (f"｜{D.summary(stats)}" if stats else ""))
         for f in fails[:6]:
             print(f"  [FAIL] {f}")
     print(f"[{'FAIL' if total_fails else 'PASS'}] storyboard check: eps={len(results)} fails={total_fails} profile={profile_name}")

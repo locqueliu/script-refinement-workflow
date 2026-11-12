@@ -13,6 +13,10 @@
 版本定位、差异与维护方式见 [版本说明.md](版本说明.md)。
 
 > 2.0 已加入文化背景硬锁：不得添加 SOURCE 未建立的中式元素、背景、器物、礼仪、称谓；不得从“夹/端/递”等中文动词反推筷子、筷架等器物。前置质检已加入 `culture-profile.json` + 0-token 文化扫描。
+>
+> 2.0 已加入主角镜头贯穿：`/前置检查` 自动识别主角与逐集覆盖，`/炼剧本` 在 plan 层按 P/R/N 规划并校验；场末落点由 `shot-profile.json` 控制。
+>
+> 2.0 已加入意象/场间过渡与女性向镜头模块：`shot-profile.json` 默认 `gaze.active=female`，模块在 `参考资料/分镜细则/gaze/`，可切 `neutral`；`male` 为占位。
 
 把一份分集剧本 `.docx` 依次炼成：
 
@@ -29,6 +33,8 @@
    - `/前置检查`
    - `/炼剧本`（竖屏分镜稿）
    - `/配乐`
+
+首次运行建议先看 `shot-profile.json`：默认 `mode=warn`（只报告主角比例/落点问题），稳定后再切 `enforce`；女频 CP 项目可在 `protagonist.names` 手动指定主角。
 
 详细流程、产物路径与常见问题见 [操作文档.md](操作文档.md)。
 
@@ -47,6 +53,7 @@
 | `标准格式执行标准与示例.md` | 源剧本交付规范与成品校验标准 |
 | `culture-profile.json` | 文化背景/目标市场配置 |
 | `storyboard-profile.json` | 竖屏分镜 profile（A 英文轻量 / B 双语完整） |
+| `shot-profile.json` | 导演层配置：主角 P/R/N、场末落点、意象/过渡开关 |
 
 ## 环境
 

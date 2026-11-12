@@ -7,6 +7,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+SCENE_HEADER_RE = re.compile(r"^\d+\s*[-－]\s*\d+\s")
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -27,6 +29,13 @@ def load_json(path, default=None):
     if not p.exists():
         return default
     return json.loads(p.read_text(encoding="utf-8-sig"))
+
+
+def load_json_safe(path, default=None):
+    try:
+        return load_json(path, default)
+    except (OSError, ValueError, TypeError):
+        return default
 
 
 def save_json(path, obj):
@@ -657,6 +666,41 @@ def parse_draft_spoken(lines):
 
 def speaker_name(prefix):
     return re.split(r"[（(]", prefix, 1)[0].strip()
+
+
+def cast_names(line):
+    """Parse a 人物/出场人物 line into names."""
+    m = re.match(r"^(?:人物|出场人物)\s*[：:]\s*(.*)$", normalize_line(line))
+    if not m:
+        return []
+    return [x.strip() for x in re.split(r"[\s、，,/／]+", m.group(1)) if x.strip()]
+
+
+def dialogue_speaker(line):
+    """Return the speaker of a labelled dialogue line, else None."""
+    s = normalize_line(line)
+    if not s or s.startswith("△") or is_structural_line(s):
+        return None
+    pair = split_speaker(s)
+    if not pair:
+        return None
+    prefix = pair[0]
+    if not detect_tag(prefix):
+        return None
+    return speaker_name(prefix)
+
+
+def has_name(text, names):
+    """Case-insensitive Latin word match + substring match for CJK names."""
+    for name in names or []:
+        if not name:
+            continue
+        if re.search(r"[A-Za-z]", name) and cjk_count(name) == 0:
+            if re.search(rf"(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])", text, re.I):
+                return True
+        elif name in text:
+            return True
+    return False
 
 
 def spoken_lang(s):
