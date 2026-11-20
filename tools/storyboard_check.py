@@ -1,8 +1,12 @@
 """竖屏分镜稿硬校验（0 token）。
 
-校验目标：分镜组时长、镜头时间轴、单镜/组/集上限、空间起点、声音/禁止字段、
-台词标签（含 O.S./VO/OS）、禁用旧字段与占位词；以及 shot-profile.json 开启时的
-主角 P/R/N、场末落点、意象/过渡标记和计划-成稿对账。
+支持两种布局：
+- `timed`：分镜组 + 镜头时间轴；
+- `scene_shotlist`：场景 + 连续镜头（镜头1…N，不显示分镜组与时长；内部时间由 plan 校验）。
+
+校验目标：结构、空间起点、声音/禁止字段、台词标签（含 O.S./VO/OS）、
+禁用旧字段与占位词；以及 shot-profile.json 开启时的主角 P/R/N、场末落点、
+意象/过渡标记和计划-成稿对账。
 
 用法：
   python tools/storyboard_check.py --docx 测试/目标稿.docx
@@ -23,6 +27,7 @@ import directing_check as D
 GROUP_RE = re.compile(r"^分镜\s*(\d+)\s*[（(]\s*时长\s*[：:]\s*([0-9]+(?:\.[0-9]+)?)\s*秒\s*[）)]")
 GROUP_SOP_RE = re.compile(r"^分镜\s*(\d+)\s*[｜|]\s*预计\s*([0-9]+(?:\.[0-9]+)?)\s*秒")
 SHOT_RE = re.compile(r"^镜头\s*(\d+)\s*[（(]\s*([0-9]+(?:\.[0-9]+)?)\s*[—\-–~]\s*([0-9]+(?:\.[0-9]+)?)\s*秒\s*[）)]")
+SHOT_LIST_RE = re.compile(r"^镜头\s*(\d+)\s*$")
 SCENE_RE = re.compile(r"^(\d+)[-－](\d+)\s+")
 CAST_RE = re.compile(r"^(?:人物|出场人物)\s*[：:]")
 
@@ -32,7 +37,8 @@ def new_ep(no):
 
 
 def new_scene(heading):
-    return {"heading": heading, "cast": []}
+    return {"heading": heading, "cast": [], "space_start": "", "sound": "",
+            "prohibit": "", "shots": [], "tags": [], "action": [], "dialogues": []}
 
 
 def new_group(no, duration):
@@ -46,6 +52,7 @@ def new_shot(no, start, end):
 
 
 def parse(lines, profile):
+    layout = profile.get("layout") == "scene_shotlist"
     episodes = []
     ep = None
     scene = None
@@ -74,6 +81,40 @@ def parse(lines, profile):
             if scene is not None:
                 scene["cast"] = [x.strip() for x in re.split(r"[、,，\s]+", s.split("：", 1)[-1].split(":", 1)[-1]) if x.strip()]
             continue
+
+        if layout:
+            m = SHOT_LIST_RE.match(s)
+            if m:
+                if scene is not None:
+                    shot = new_shot(int(m.group(1)), None, None)
+                    scene["shots"].append(shot)
+                continue
+            if re.match(r"^空间(?:起点)?\s*[：:]", s) and scene is not None:
+                scene["space_start"] = re.sub(r"^空间(?:起点)?\s*[：:]\s*", "", s)
+                continue
+            if s.startswith("画面范围") and shot is not None:
+                shot["frame_range"] = re.sub(r"^画面范围\s*[：:]\s*", "", s)
+                continue
+            if s.startswith("画外锁定") and shot is not None:
+                shot["offscreen"] = re.sub(r"^画外锁定[^：:]*[：:]\s*", "", s)
+                continue
+            if re.match(r"^(?:声音设计|声音)\s*[：:]", s) and scene is not None:
+                scene["sound"] = re.sub(r"^(?:声音设计|声音)\s*[：:]\s*", "", s)
+                continue
+            if re.match(r"^(?:硬性禁止|禁止)\s*[：:]", s) and scene is not None:
+                scene["prohibit"] = re.sub(r"^(?:硬性禁止|禁止)\s*[：:]\s*", "", s)
+                continue
+            if s.startswith("【"):
+                (shot or scene or ep).setdefault("tags", []).append(s)
+                continue
+            rec = C.parse_storyboard_dialogue(s)
+            if rec:
+                rec["line"] = s
+                (shot or scene or ep).setdefault("dialogues", []).append(rec)
+                continue
+            (shot or scene or ep).setdefault("action", []).append(s)
+            continue
+
         m = GROUP_RE.match(s) or GROUP_SOP_RE.match(s)
         if m:
             group = new_group(int(m.group(1)), float(m.group(2)))
@@ -113,7 +154,87 @@ def parse(lines, profile):
     return episodes
 
 
+def check_ep_shotlist(ep, profile, plan=None, shot_profile=None):
+    """校验 scene_shotlist 布局：场景 + 连续镜头，无分组/时长。"""
+    fails, warns = [], []
+    scenes = ep.get("scenes") or []
+    if not scenes:
+        fails.append("没有场次行")
+        return fails, warns
+    if any(re.match(r"^分镜\s*\d+", x) for x in ep.get("raw") or []):
+        fails.append("scene_shotlist 成品不应出现 分镜N / 分镜时长")
+    if any(re.match(r"^镜头\s*\d+\s*[（(]", x) for x in ep.get("raw") or []):
+        fails.append("scene_shotlist 成品不应出现 镜头时间")
+    total_shots = 0
+    for sc in scenes:
+        label = (sc.get("heading") or "")[:20]
+        if not sc.get("cast"):
+            warns.append(f"场次 {label} 缺人物/出场人物行")
+        if not sc.get("space_start"):
+            fails.append(f"场次 {label} 缺空间起点")
+        else:
+            if len(sc["space_start"]) < 10:
+                fails.append(f"场次 {label} 空间起点过短")
+            for phrase in profile.get("space_forbid_phrases", []):
+                if phrase in sc["space_start"]:
+                    fails.append(f"场次 {label} 空间起点含省略词「{phrase}」")
+        if not sc.get("sound"):
+            fails.append(f"场次 {label} 缺声音设计/声音")
+        if not sc.get("prohibit"):
+            fails.append(f"场次 {label} 缺禁止项")
+        shots = sc.get("shots") or []
+        if not shots:
+            fails.append(f"场次 {label} 没有镜头")
+            continue
+        for j, sh in enumerate(shots, 1):
+            if sh.get("no") != j:
+                fails.append(f"场次 {label} 镜头编号不连续：第{j}镜写作镜头{sh.get('no')}")
+            if not sh.get("action") and not sh.get("dialogues"):
+                warns.append(f"场次 {label} 镜头{sh.get('no')} 没有动作或台词")
+        total_shots += len(shots)
+
+    s_lo, s_hi = int(profile["shots_per_ep"][0]), int(profile["shots_per_ep"][1])
+    if total_shots > s_hi:
+        fails.append(f"镜头数 {total_shots} 超出目标上限 {s_hi}")
+    elif total_shots < s_lo:
+        warns.append(f"镜头数 {total_shots} 低于目标下限 {s_lo}")
+
+    for token in profile.get("forbid_tokens", []):
+        if token == "△":
+            if any(x.startswith("△") for x in ep["raw"]):
+                fails.append("出现禁用符号 △")
+        elif token in "\n".join(ep["raw"]):
+            fails.append(f"出现禁用字段/标记：{token}")
+    if profile.get("language") == "english":
+        cn = sum(1 for sc in scenes for sh in sc.get("shots", [])
+                 for d in sh.get("dialogues", []) if d.get("lang") == "cn")
+        if cn:
+            fails.append(f"A profile 出现 {cn} 行中文台词（只保留英文）")
+
+    cjk = C.cjk_count("\n".join(ep["raw"]))
+    c_lo, c_hi = int(profile["cjk_per_ep"][0]), int(profile["cjk_per_ep"][1])
+    if cjk > c_hi:
+        warns.append(f"中文字数 {cjk} 超过目标上限 {c_hi}，仅作提示，不作为失败条件")
+    elif cjk < c_lo:
+        warns.append(f"中文字数 {cjk} 低于目标下限 {c_lo}")
+    t_target = int(profile.get("total_chars_target", 9000))
+    t_hi = int(profile.get("total_chars_per_ep", 10000))
+    total = C.total_char_count(ep.get("source_text") or "\n".join(ep["raw"]))
+    if total > t_hi:
+        fails.append(f"单集总字符数 {total} 超出硬上限 {t_hi}（含标点/空格/换行），必须打回压缩")
+    elif total > t_target:
+        warns.append(f"单集总字符数 {total} 超过目标 {t_target}，建议压缩")
+
+    if plan and shot_profile and shot_profile.get("enabled", True):
+        df, dw = D.check_plan_draft(plan, ep, layout="scene_shotlist")
+        fails.extend(df)
+        warns.extend(dw)
+    return fails, warns
+
+
 def check_ep(ep, profile, plan=None, shot_profile=None):
+    if profile.get("layout") == "scene_shotlist":
+        return check_ep_shotlist(ep, profile, plan, shot_profile)
     fails, warns = [], []
     tol = float(profile.get("time_tolerance", 0.06))
     groups = ep["groups"]
@@ -382,23 +503,34 @@ def main():
 
     results = []
     total_fails = 0
+    layout = profile.get("layout") == "scene_shotlist"
     for ep in sorted(episodes, key=lambda x: x["no"]):
         plan = plans.get(ep["no"])
         fails, warns = check_ep(ep, profile, plan, shot_profile)
         total_fails += len(fails)
         groups = ep["groups"]
-        shots = sum(len(g["shots"]) for g in groups)
+        if layout:
+            shots = sum(len(sc.get("shots") or []) for sc in ep.get("scenes") or [])
+            duration = None
+        else:
+            shots = sum(len(g["shots"]) for g in groups)
+            duration = round(sum(g["duration"] for g in groups), 2)
         cjk = C.cjk_count("\n".join(ep["raw"]))
         total = C.total_char_count(ep.get("source_text") or "\n".join(ep["raw"]))
         stats = (D.stats_from_plan(plan, shot_profile)
                  if plan and shot_profile.get("enabled", True) else {})
-        results.append({"ep": ep["no"], "groups": len(groups), "shots": shots,
-                        "duration": round(sum(g["duration"] for g in groups), 2),
+        results.append({"ep": ep["no"], "layout": profile.get("layout", "timed"),
+                        "scenes": len(ep.get("scenes") or []), "groups": len(groups),
+                        "shots": shots, "duration": duration,
                         "cjk": cjk, "total": total, "fails": fails, "warns": warns,
                         "directing": stats})
-        print(f"EP{ep['no']:02d} 组{len(groups)}｜镜{shots}｜{round(sum(g['duration'] for g in groups), 1)}s｜"
-              f"中文{cjk}｜总字符{total}｜失败{len(fails)}｜警告{len(warns)}"
-              + (f"｜{D.summary(stats)}" if stats else ""))
+        if layout:
+            head = (f"EP{ep['no']:02d} 场{len(ep.get('scenes') or [])}｜镜{shots}｜"
+                    f"中文{cjk}｜总字符{total}｜失败{len(fails)}｜警告{len(warns)}")
+        else:
+            head = (f"EP{ep['no']:02d} 组{len(groups)}｜镜{shots}｜{duration}s｜"
+                    f"中文{cjk}｜总字符{total}｜失败{len(fails)}｜警告{len(warns)}")
+        print(head + (f"｜{D.summary(stats)}" if stats else ""))
         for f in fails[:6]:
             print(f"  [FAIL] {f}")
     print(f"[{'FAIL' if total_fails else 'PASS'}] storyboard check: eps={len(results)} fails={total_fails} profile={profile_name}")

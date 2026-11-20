@@ -506,9 +506,25 @@ def check_plan(plan, shot_profile=None, root=None):
     return fails, warns, stats
 
 
-def check_plan_draft(plan, ep, tol=0.06):
+def check_plan_draft(plan, ep, tol=0.06, layout="timed"):
     """Compare plan shot structure against parsed draft. Return (fails, warns)."""
     fails, warns = [], []
+    if layout == "scene_shotlist":
+        plan_scenes = plan.get("scenes") or []
+        ep_scenes = ep.get("scenes") or []
+        if len(plan_scenes) != len(ep_scenes):
+            fails.append(f"成稿场次数 {len(ep_scenes)} ≠ 计划 {len(plan_scenes)}")
+        for ps, es in zip(plan_scenes, ep_scenes):
+            scene = ps.get("scene") or es.get("heading") or ""
+            pshots = [sh for g in (ps.get("groups") or []) for sh in (g.get("shots") or [])]
+            eshots = es.get("shots") or []
+            if len(pshots) != len(eshots):
+                fails.append(f"场次 {scene} 成稿镜头数 {len(eshots)} ≠ 计划 {len(pshots)}")
+            for j, (a, b) in enumerate(zip(pshots, eshots), 1):
+                if j != int(b.get("no") or -1):
+                    fails.append(f"场次 {scene} 第{j}镜编号为 {b.get('no')}")
+        return fails, warns
+
     plan_groups = [g for sc in (plan.get("scenes") or []) for g in (sc.get("groups") or [])]
     ep_groups = ep.get("groups") or []
     if len(plan_groups) != len(ep_groups):

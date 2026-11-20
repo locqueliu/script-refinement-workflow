@@ -73,6 +73,8 @@ permissions:
 
 只写 `work/storyboard/epNN_plan.json`，结构严格按 `01-planning.md`：
 
+> 本分支成品布局为 `scene_shotlist`：plan 仍保留 `groups` / `duration` / `start` / `end`，用于内部节奏与校验；writer 会把 plan 压平成“场景 + 连续镜头”，不要在 plan 里改成 scene-level shots。
+
 ```json
 {"ep":1,"profile":"B_bilingual_full",
  "protagonist":{"name":"A","aliases":[],"mode":"single"},

@@ -1,6 +1,7 @@
 # 功能镜：场末落点、意象、场间过渡
 
 > 当前启用：`landing` + `image` + `transition`（`shot-profile.json` 默认 `[1,2]`）。
+> 成品布局为 `scene_shotlist`：marks 只写 `epNN_plan.json`，成品不显示分镜组/时长。
 > `image` / `transition` 可单独关闭：把对应数组改回 `[0,0]`。
 > 所有功能镜都必须服从事实锁、台词锁、文化锁和总预算。
 

@@ -63,7 +63,7 @@ def check_refined(root: Path, eps):
     out = {}
     for n in eps:
         sp = root / "work" / "source" / f"ep{n:02d}.md"
-        dp = root / "work" / "draft" / f"ep{n:02d}.md"
+        dp = root / "work" / "storyboard" / f"ep{n:02d}.md"
         if not sp.exists() or not dp.exists():
             out[n] = {"status": "SKIP", "detail": "未执行炼本"}
             continue
@@ -82,9 +82,16 @@ def cell(s):
 
 
 def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, culture=None,
-                   dialogue_audit=None):
+                   dialogue_audit=None, storyboard=None, protagonist=None, punctuation=None):
     culture = culture or []
     da = dialogue_audit or {}
+    sb = storyboard or {}
+    prot = protagonist or {}
+    punct = punctuation or {}
+    sb_results = {int(r.get("ep") or 0): r for r in (sb.get("results") or [])
+                  if isinstance(r, dict) and r.get("ep") is not None}
+    prot_eps = {int(r.get("ep") or 0): r for r in (prot.get("episodes") or [])
+                if isinstance(r, dict) and r.get("ep") is not None}
     da_totals = da.get("totals") or {}
     da_rows = da.get("rows") or []
     da_summary = da.get("summary") or []
@@ -133,22 +140,39 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
     else:
         lines.append("| 前置阶段台词变动（源稿→优化存档） | 无变动（全部逐字锁定校验通过） |")
     if not has_draft:
-        lines.append("| 炼本阶段台词变动（优化存档→导演执行稿） | 未执行炼本 |")
+        lines.append("| 炼本阶段台词变动（优化存档→竖屏分镜稿） | 未执行炼本 |")
     elif post_fail:
-        lines.append(f"| 炼本阶段台词变动（优化存档→导演执行稿） | 有：{'、'.join(f'EP{n:02d}' for n in post_fail)} |")
+        lines.append(f"| 炼本阶段台词变动（优化存档→竖屏分镜稿） | 有：{'、'.join(f'EP{n:02d}' for n in post_fail)} |")
     else:
-        lines.append("| 炼本阶段台词变动（优化存档→导演执行稿） | 无变动 |")
+        lines.append("| 炼本阶段台词变动（优化存档→竖屏分镜稿） | 无变动 |")
     if da_available:
         lines.append(f"| 台词逐句核对（原文 vs 成品，含无标签句） | 失败 {da_fails} 行；补标-需确认 {da_confirm} 行；自动补标（对白）{da_auto} 行（明细见第六节）|")
     else:
         lines.append("| 台词逐句核对（原文 vs 成品，含无标签句） | 未执行 |")
     over_eps = [n for n in eps if words.get(n, {}).get("over")]
     if not has_draft:
-        lines.append(f"| 炼本单集字数（上限 {MAX_DRAFT_CJK} 字） | 未执行炼本 |")
+        lines.append("| 炼本单集总字符数（上限 10000） | 未执行炼本 |")
     elif over_eps:
-        lines.append(f"| 炼本单集字数（上限 {MAX_DRAFT_CJK} 字） | 有超标：{'、'.join(f'EP{n:02d}' for n in over_eps)} |")
+        lines.append(f"| 炼本单集总字符数（上限 10000） | 有超标：{'、'.join(f'EP{n:02d}' for n in over_eps)} |")
     else:
-        lines.append(f"| 炼本单集字数（上限 {MAX_DRAFT_CJK} 字） | 全部合格 |")
+        lines.append("| 炼本单集总字符数（上限 10000） | 全部合格 |")
+    sb_shots = sum(int(r.get("shots") or 0) for r in sb_results.values())
+    sb_scenes = sum(int(r.get("scenes") or 0) for r in sb_results.values())
+    sb_dirs = [r.get("directing") or {} for r in sb_results.values()]
+    sb_p = sum(int(d.get("p") or 0) for d in sb_dirs)
+    sb_r = sum(int(d.get("r") or 0) for d in sb_dirs)
+    sb_n = sum(int(d.get("n") or 0) for d in sb_dirs)
+    sb_img = sum(int(d.get("image_count") or 0) for d in sb_dirs)
+    sb_tr = sum(int(d.get("transition_count") or 0) for d in sb_dirs)
+    sb_ld = sum(int(d.get("landing_count") or 0) for d in sb_dirs)
+    if sb_results:
+        lines.append(f"| 分镜结构 | {sb_scenes} 场 / {sb_shots} 镜（成品不显示分镜组与时长） |")
+        lines.append(f"| 主角镜头（全集合计） | P {sb_p} / R {sb_r} / N {sb_n} |")
+        lines.append(f"| 功能镜（全集合计） | 意象 {sb_img} / 过渡 {sb_tr} / 落点 {sb_ld} |")
+    blocked = prot.get("blocked_eps") or []
+    low = prot.get("low_coverage_eps") or []
+    if prot:
+        lines.append(f"| 主角覆盖 | 主角 {prot.get('protagonist') or '未识别'}；blocked {blocked or '无'}；低覆盖 {low or '无'} |")
     lines.append("")
 
     lines += ["## 一、剧情修改情况", "",
@@ -195,25 +219,29 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
         lines.append(f"| EP{n:02d} | {r['status']} | {cell(note)} |")
     lines.append("")
 
-    lines += ["### 炼本阶段（优化存档 → 导演执行稿）", "", "| 集 | 结果 | 明细 |", "|---|---|---|"]
+    lines += ["### 炼本阶段（优化存档 → 竖屏分镜稿）", "", "| 集 | 结果 | 明细 |", "|---|---|---|"]
     for n in eps:
         r = post.get(n, {"status": "SKIP", "detail": "未执行炼本"})
         note = f"文字流 {r.get('chars', '')} 字" if r["status"] == "PASS" else r.get("detail", "")
         lines.append(f"| EP{n:02d} | {r['status']} | {cell(note)} |")
     lines.append("")
 
-    lines += ["## 三、炼本字数检测", "",
-              f"上限：单集中文（CJK）字数不超过 {MAX_DRAFT_CJK} 字（超出会被炼本校验打回重炼）。", "",
-              "| 集 | 源存档字数 | 炼本成品字数 | 结果 |", "|---|---:|---:|---|"]
+    lines += ["## 三、炼本字数与分镜结构", "",
+              "上限：单集总字符（含标点/空格/换行）不超过 10000；中文字 4500—9000 为目标提示。", "",
+              "| 集 | 源存档中文字数 | 成品中文字数 | 成品总字符 | 场景/镜头 | 结果 |",
+              "|---|---:|---:|---:|---|---|"]
     for n in eps:
         w = words.get(n, {})
         cnt = w.get("count")
+        total = w.get("total")
         srcv = w.get("src")
         srcv = srcv if srcv is not None else "—"
-        if cnt is None:
-            lines.append(f"| EP{n:02d} | {srcv} | — | 未执行炼本 |")
+        sr = sb_results.get(n, {})
+        shape = f"{sr.get('scenes', '—')}/{sr.get('shots', '—')}"
+        if total is None:
+            lines.append(f"| EP{n:02d} | {srcv} | — | — | — | 未执行炼本 |")
         else:
-            lines.append(f"| EP{n:02d} | {srcv} | {cnt} | {'超标' if w.get('over') else '合格'} |")
+            lines.append(f"| EP{n:02d} | {srcv} | {cnt if cnt is not None else '—'} | {total} | {shape} | {'超标' if w.get('over') else '合格'} |")
     lines.append("")
 
     lines += ["## 四、动作/对白密度检测与处理记录", "",
@@ -318,7 +346,67 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
         lines.append("> 全量逐句（含 OK 行）见 `work/report/dialogue_audit.json`。")
         lines.append("")
 
-    lines += ["## 七、结论", ""]
+    lines += ["## 七、英文台词标点审查", ""]
+    punct_rows = punct.get("results") or []
+    if punct_rows:
+        must = [r for r in punct_rows if r.get("severity") == "must_fix"]
+        warn = [r for r in punct_rows if r.get("severity") == "warn"]
+        lines += [f"- must_fix：{len(must)} 项；warn：{len(warn)} 项。", "",
+                  "| 集 | 段落 | 问题 | 次数 | 级别 | 上下文/建议 |", "|---:|---:|---|---:|---|---|"]
+        for r in (must + warn)[:200]:
+            lines.append(f"| {r.get('ep', '')} | {r.get('paragraph', '')} | {cell(r.get('kind', ''))} | "
+                         f"{r.get('count', '')} | {r.get('severity', '')} | "
+                         f"{cell(r.get('context', ''))} / {cell(r.get('suggestion', ''))} |")
+        lines.append("")
+    else:
+        lines += ["未执行英文台词标点审查（2.0 当前未接入 `preflight_punctuation_check.py`；1.0 已有该检查）。", ""]
+
+    lines += ["## 八、主角覆盖与未进入炼本", ""]
+    if not prot:
+        lines += ["未执行主角覆盖检查。", ""]
+    else:
+        lines += [f"- 主角：{prot.get('protagonist') or '未识别'}；别名：{prot.get('aliases') or '无'}；"
+                  f"模式：{prot.get('mode') or 'warn'}；enforce：{prot.get('enforce')}",
+                  f"- blocked：{prot.get('blocked_eps') or '无'}；低覆盖：{prot.get('low_coverage_eps') or '无'}",
+                  "",
+                  "| 集 | 场次 | 主角场次 | 场次占比 | 台词占比 | 覆盖分 | 状态 | 处理 |",
+                  "|---:|---:|---:|---:|---:|---:|---|---|"]
+        for n in eps:
+            r = prot_eps.get(n, {})
+            if not r:
+                lines.append(f"| EP{n:02d} | — | — | — | — | — | 未执行 | — |")
+                continue
+            action = "blocked，不进入炼本" if r.get("blocked") else ("低覆盖，继续" if r.get("status") in ("NO_PROTAGONIST", "LOW_PROTAGONIST") else "—")
+            lines.append(f"| EP{n:02d} | {r.get('scenes', '—')} | {r.get('protagonist_scenes', '—')} | "
+                         f"{r.get('scene_ratio', '—')} | {r.get('dialogue_ratio', '—')} | "
+                         f"{r.get('coverage_score', '—')} | {r.get('status', '—')} | {action} |")
+        lines.append("")
+
+    lines += ["## 九、主角镜头与导演层", ""]
+    if not sb_results:
+        lines += ["未执行分镜校验，缺少 `work/report/storyboard_check.json`。", ""]
+    else:
+        lines += ["| 集 | 镜头 | P | R | N | 关联占比 | 本人占比 | 最长N | 意象 | 过渡 | 落点 | gaze |",
+                  "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
+        for n in eps:
+            r = sb_results.get(n, {})
+            d = r.get("directing") or {}
+            gaze = "、".join(d.get("gaze_types") or []) or "—"
+            lines.append(f"| EP{n:02d} | {r.get('shots', '—')} | {d.get('p', '—')} | {d.get('r', '—')} | "
+                         f"{d.get('n', '—')} | {d.get('related_ratio', '—')} | {d.get('protagonist_ratio', '—')} | "
+                         f"{d.get('max_n_run', '—')} | {d.get('image_count', '—')} | {d.get('transition_count', '—')} | "
+                         f"{d.get('landing_count', '—')} | {cell(gaze)} |")
+        lines.append("")
+        bad = [(n, r) for n, r in sb_results.items() if r.get("fails")]
+        if bad:
+            lines += ["### 分镜硬校验失败集", "", "| 集 | 失败原因 |", "|---:|---|"]
+            for n, r in bad:
+                lines.append(f"| EP{n:02d} | {cell('；'.join(str(x) for x in r.get('fails')[:6]))} |")
+            lines.append("")
+        else:
+            lines += ["分镜硬校验：全部通过。", ""]
+
+    lines += ["## 十、结论", ""]
     if not fix_eps and not pre_fail and not post_fail:
         lines.append("- 剧情：无较大剧情修改，仅动作丰富与格式整理。")
     elif fix_eps:
@@ -335,6 +423,13 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
         lines.append(f"- 文化背景：must_fix {len(culture_must)} 项、suspected {len(culture_sus)} 项；动作行已交优化器中性化，台词/锁行需人工复核（详见第五节）。")
     else:
         lines.append("- 文化背景：未检测到需处理的中式元素。")
+    if sb_results:
+        lines.append(f"- 主角镜头：P {sb_p} / R {sb_r} / N {sb_n}；关联占比按集见第九节。")
+        lines.append(f"- 功能镜：意象 {sb_img} / 过渡 {sb_tr} / 落点 {sb_ld}；详见第九节。")
+    if prot.get("blocked_eps"):
+        lines.append(f"- 主角覆盖：blocked 集 {prot.get('blocked_eps')} 未进入炼本（主角戏份不足），需改源稿后重跑 `/前置检查`。")
+    elif prot:
+        lines.append("- 主角覆盖：无 blocked 集。")
     if pre_fail or post_fail:
         lines.append(f"- 台词锁定校验（有标签行）：检测到变动集（前置：{pre_fail or '无'}；炼本：{post_fail or '无'}），请人工复核对应明细。")
     else:
@@ -348,9 +443,9 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
         lines.append("- 台词逐句核对：未执行。")
     if has_draft:
         if over_eps:
-            lines.append(f"- 字数：{'、'.join(f'EP{n:02d}' for n in over_eps)} 超出单集上限 {MAX_DRAFT_CJK} 字，请核查。")
+            lines.append(f"- 字数：{'、'.join(f'EP{n:02d}' for n in over_eps)} 超出单集总字符上限 10000，请核查。")
         else:
-            lines.append(f"- 字数：全部集数在单集上限（{MAX_DRAFT_CJK} 字）以内。")
+            lines.append("- 字数：全部集数在单集总字符上限（10000，含标点/空格/换行）以内。")
     if not has_draft:
         lines.append("- 备注：本报告生成时未执行炼本（/炼剧本），炼本阶段核查为未执行。")
     lines.append("")
@@ -461,17 +556,18 @@ def main() -> int:
     paras_path = root / "work" / "meta" / "paragraphs.txt"
     paras = paras_path.read_text(encoding="utf-8-sig").splitlines() if paras_path.exists() else []
     pre = check_preflight(root, eps, paras)
-    has_draft = any((root / "work" / "draft" / f"ep{n:02d}.md").exists() for n in eps)
+    has_draft = any((root / "work" / "storyboard" / f"ep{n:02d}.md").exists() for n in eps)
     post = check_refined(root, eps)
     words = {}
     for n in eps:
         src_p = root / "work" / "source" / f"ep{n:02d}.md"
-        drf_p = root / "work" / "draft" / f"ep{n:02d}.md"
+        drf_p = root / "work" / "storyboard" / f"ep{n:02d}.md"
         words[n] = {
             "src": C.cjk_count(C.read_text(src_p)) if src_p.exists() else None,
             "count": C.cjk_count(C.read_text(drf_p)) if drf_p.exists() else None,
+            "total": C.total_char_count(C.read_text(drf_p)) if drf_p.exists() else None,
         }
-        words[n]["over"] = bool(words[n]["count"] is not None and words[n]["count"] > MAX_DRAFT_CJK)
+        words[n]["over"] = bool(words[n]["total"] is not None and words[n]["total"] > 10000)
 
     ap = C.load_json(root / "work" / "preflight" / "atom_pacing.json", {}) or {}
     dd = C.load_json(root / "work" / "preflight" / "dialogue_density.json", {}) or {}
@@ -494,8 +590,12 @@ def main() -> int:
     culture_data = C.load_json(root / "work" / "preflight" / "culture.json", {}) or {}
     culture = culture_data.get("results", []) or []
     dialogue_audit = C.load_json(root / "work" / "report" / "dialogue_audit.json", {}) or {}
+    storyboard = C.load_json(root / "work" / "report" / "storyboard_check.json", {}) or {}
+    protagonist = C.load_json(root / "work" / "preflight" / "protagonist.json", {}) or {}
+    punctuation = C.load_json(root / "work" / "preflight" / "punctuation.json", {}) or {}
 
-    md = build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing, culture, dialogue_audit)
+    md = build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing, culture,
+                        dialogue_audit, storyboard, protagonist, punctuation)
     out_dir = Path(args.out_dir) if args.out_dir else (root / "output")
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / f"{stem}_质检报告.md"
