@@ -163,12 +163,14 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
     sb_r = sum(int(d.get("r") or 0) for d in sb_dirs)
     sb_n = sum(int(d.get("n") or 0) for d in sb_dirs)
     sb_img = sum(int(d.get("image_count") or 0) for d in sb_dirs)
+    sb_empty = sum(int(d.get("image_empty_count") or 0) for d in sb_dirs)
     sb_tr = sum(int(d.get("transition_count") or 0) for d in sb_dirs)
     sb_ld = sum(int(d.get("landing_count") or 0) for d in sb_dirs)
+    sb_formal = sum(int(d.get("formal_count") or 0) for d in sb_dirs)
     if sb_results:
         lines.append(f"| 分镜结构 | {sb_scenes} 场 / {sb_shots} 镜（成品不显示分镜组与时长） |")
         lines.append(f"| 主角镜头（全集合计） | P {sb_p} / R {sb_r} / N {sb_n} |")
-        lines.append(f"| 功能镜（全集合计） | 意象 {sb_img} / 过渡 {sb_tr} / 落点 {sb_ld} |")
+        lines.append(f"| 功能镜（全集合计） | 意象 {sb_img}（空景 {sb_empty}）/ 过渡 {sb_tr} / 落点 {sb_ld} / 周正 {sb_formal} |")
     blocked = prot.get("blocked_eps") or []
     low = prot.get("low_coverage_eps") or []
     if prot:
@@ -386,16 +388,17 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
     if not sb_results:
         lines += ["未执行分镜校验，缺少 `work/report/storyboard_check.json`。", ""]
     else:
-        lines += ["| 集 | 镜头 | P | R | N | 关联占比 | 本人占比 | 最长N | 意象 | 过渡 | 落点 | gaze |",
-                  "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
+        lines += ["| 集 | 镜头 | P | R | N | 关联占比 | 本人占比 | 最长N | 意象 | 空景 | 过渡 | 落点 | 周正 | gaze |",
+                  "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
         for n in eps:
             r = sb_results.get(n, {})
             d = r.get("directing") or {}
             gaze = "、".join(d.get("gaze_types") or []) or "—"
             lines.append(f"| EP{n:02d} | {r.get('shots', '—')} | {d.get('p', '—')} | {d.get('r', '—')} | "
                          f"{d.get('n', '—')} | {d.get('related_ratio', '—')} | {d.get('protagonist_ratio', '—')} | "
-                         f"{d.get('max_n_run', '—')} | {d.get('image_count', '—')} | {d.get('transition_count', '—')} | "
-                         f"{d.get('landing_count', '—')} | {cell(gaze)} |")
+                         f"{d.get('max_n_run', '—')} | {d.get('image_count', '—')} | {d.get('image_empty_count', '—')} | "
+                         f"{d.get('transition_count', '—')} | {d.get('landing_count', '—')} | {d.get('formal_count', '—')} | "
+                         f"{cell(gaze)} |")
         lines.append("")
         bad = [(n, r) for n, r in sb_results.items() if r.get("fails")]
         if bad:
@@ -425,7 +428,7 @@ def build_markdown(stem, eps, per_ep, pre, post, words, has_draft, pacing=None, 
         lines.append("- 文化背景：未检测到需处理的中式元素。")
     if sb_results:
         lines.append(f"- 主角镜头：P {sb_p} / R {sb_r} / N {sb_n}；关联占比按集见第九节。")
-        lines.append(f"- 功能镜：意象 {sb_img} / 过渡 {sb_tr} / 落点 {sb_ld}；详见第九节。")
+        lines.append(f"- 功能镜：意象 {sb_img}（空景 {sb_empty}）/ 过渡 {sb_tr} / 落点 {sb_ld} / 周正 {sb_formal}；详见第九节。")
     if prot.get("blocked_eps"):
         lines.append(f"- 主角覆盖：blocked 集 {prot.get('blocked_eps')} 未进入炼本（主角戏份不足），需改源稿后重跑 `/前置检查`。")
     elif prot:

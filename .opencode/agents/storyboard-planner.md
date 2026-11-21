@@ -46,8 +46,10 @@ permissions:
 
 1. 读主角与 `scene_map`，逐场写主角贯穿线（要什么 → 阻力 → 决定 → 状态变化）。
 2. 先排 P（首次揭示、决定、动作结果、情绪落点），再排 R（合法锚点），最后排 N。
-3. 留功能镜预算：每场 `marks.landing` 必填；`image`/`transition` 只在 `shot-profile.json` 开启时规划。
+3. 留功能镜预算：每场 `marks.landing` 必填；`image`/`transition`/`formal` 只在 `shot-profile.json` 开启时规划。
 3.1 写 `marks.gaze_beats`：`gaze.active != neutral` 时必填；每集至少 3 类、至少 1 个 `object`、1 个 `aftermath`；类型只用 `agency/micro_emotion/object/distance/aftermath/non_objectifying`。
+3.2 写 `marks.image`：每集 2–3 个；`kind` 为 `object/borrowed/empty`，纯空景最多 1 个，至少 1 个 `object/borrowed`；1.5–3.0s、无台词、`motif/source_basis` 必填。
+3.3 写 `marks.formal`：每集 2–3 个周正机位；`type` 为 `front/profile/symmetrical/eye_level`；`purpose` 必填；同场 ≤2、不得连续、至少 2 种类型。
 4. 自检比例：`(P+R)/total ≥70%`、`P/total ≥35%`、`N/total ≤30%`、连续 N ≤2、有主角在场场次至少 1 个 P/R。
 5. 再按 01-planning 的“锁定事实 → 分场 → 排时间 → 分组 → 空间起点 → 逐镜计划 → 台词拆分 → 自检”落地。
 
@@ -58,7 +60,9 @@ permissions:
 - 单集 >145 秒需确认是否必要；不得为接近 150 秒加镜、加动作或加环境描写。
 - 每个镜头必须有 `relation`（P/R/N）与 `anchor`；P 用 `face/eyes/body/action/hand/pov/voice/reaction/decision`；R 用 `pov/ots/foreground/frame/observe/object/hand/voice/reaction/cause/sound/reflection/shadow`；N 用 `none`。
 - 每个场景必须有 `marks.landing`；场末最后一镜 ≥2.5 秒（重点场 4—6 秒）；组末最后一镜 ≥2.0 秒；集末 2.5—4.0 秒钩子。
-- `marks.image` / `marks.transition` 只在配置开启时填写；未开启时不要加。
+- `marks.image` / `marks.transition` / `marks.formal` 只在配置开启时填写；未开启时不要加。
+- `marks.image`：每集 2–3 个，`kind` 为 `object/borrowed/empty`，纯空景 ≤1，至少 1 个 `object/borrowed`，1.5–3.0s、无台词、`motif/source_basis` 必填。
+- `marks.formal`：每集 2–3 个周正机位，`type` 为 `front/profile/symmetrical/eye_level`，`purpose` 必填，同场 ≤2、不得连续、至少 2 种类型。
 - `gaze.active != neutral` 时，`marks.gaze_beats` 必填；至少 3 类、至少 1 个 `object`、1 个 `aftermath`；`group`/`shot` 必须指向真实镜头。
 - 每组必须有完整 `space_start`（0.0 秒仍在场的全部人物：站点、朝向、距离、参照物、摄影机方向），不得用“同上/同前/位置不变/承接上一/参照上组”。
 - 每组必须有 `sound`、`prohibit`。
@@ -79,7 +83,8 @@ permissions:
 {"ep":1,"profile":"B_bilingual_full",
  "protagonist":{"name":"A","aliases":[],"mode":"single"},
  "marks":{"landing":[{"scene":"1-1","group":1,"shots":[1],"handoff":"sound"}],
-          "gaze_beats":[{"group":1,"shot":1,"type":"micro_emotion"}]},
+          "gaze_beats":[{"group":1,"shot":1,"type":"micro_emotion"}],
+          "formal":[{"group":1,"shot":1,"type":"front","purpose":"建立主角与空间"}]},
  "scenes":[
  {"scene":"1-1","heading":"1-1 日 外 场景","cast":["A","B"],"groups":[
    {"no":1,"duration":12.0,"space_start":"…","sound":"…","prohibit":"无背景音乐，无字幕",

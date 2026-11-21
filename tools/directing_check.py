@@ -31,6 +31,8 @@ RELATIONS = {"P", "R", "N"}
 HANDOFFS = {"sound", "eyeline", "action", "object", "match_cut"}
 TRANSITION_TYPES = {"scene_cut", "time_jump", "location_change", "event_block"}
 TRANSITION_TECHNIQUES = {"sound_bridge", "match_cut", "pov", "foreground", "empty_shot"}
+FORMAL_TYPES = {"front", "profile", "symmetrical", "eye_level"}
+IMAGE_KINDS = {"object", "empty", "borrowed"}
 GAZE_TYPES = {"agency", "micro_emotion", "object", "distance", "aftermath", "non_objectifying"}
 FORBIDDEN_GAZE_TAGS = ("胸特写", "腿特写", "臀特写", "唇部特写", "胸部特写", "腿部特写")
 CLOSEUP_RE = re.compile(r"特写")
@@ -230,6 +232,12 @@ def stats_from_plan(plan, profile=None, root=None):
     gaze_beats = _marks(plan, "gaze_beats")
     gaze_types = sorted({str(x.get("type")) for x in gaze_beats
                          if isinstance(x, dict) and x.get("type")})
+    formal_beats = _marks(plan, "formal")
+    formal_types = sorted({str(x.get("type")) for x in formal_beats
+                           if isinstance(x, dict) and x.get("type")})
+    image_kinds = [str(x.get("kind") or "object") for x in _marks(plan, "image")
+                   if isinstance(x, dict)]
+    image_empty_count = sum(1 for x in image_kinds if x == "empty")
     stats = {
         "protagonist": name,
         "protagonist_mode": mode,
@@ -256,8 +264,11 @@ def stats_from_plan(plan, profile=None, root=None):
         "missing_relation": missing_relation,
         "shot_count": total,
         "image_count": len(_marks(plan, "image")),
+        "image_empty_count": image_empty_count,
         "transition_count": len(_marks(plan, "transition")),
         "landing_count": len(_marks(plan, "landing")),
+        "formal_count": len(formal_beats),
+        "formal_types": formal_types,
         "gaze_beat_count": len(gaze_beats),
         "gaze_types": gaze_types,
     }
@@ -349,7 +360,54 @@ def _check_landing(plan, directing, enforce, fails, warns):
             _add(fails, warns, f"集末钩子关系为 {rel}，建议 P/R", False, enforce)
 
 
-def _check_mark_refs(plan, key, cfg, enforce, fails, warns, kind):
+def _check_formal(plan, directing, enforce, fails, warns):
+    cfg = directing.get("formal_shots_per_ep") or [0, 0]
+    if not isinstance(cfg, (list, tuple)) or len(cfg) < 2:
+        return
+    lo, hi = int(cfg[0]), int(cfg[1])
+    if hi <= 0:
+        return
+    marks = _marks(plan, "formal")
+    if len(marks) < lo or len(marks) > hi:
+        _add(fails, warns, f"周正镜头数量 {len(marks)} 不在 {cfg}", True, enforce)
+    max_per_scene = int(directing.get("formal_max_per_scene", 2))
+    records = list(iter_plan_shots(plan))
+    types = set()
+    per_scene = {}
+    prev_idx = -10
+    for item in marks:
+        if not isinstance(item, dict):
+            _add(fails, warns, "周正镜头标记不是对象", True, enforce)
+            continue
+        t = str(item.get("type") or "")
+        if t not in FORMAL_TYPES:
+            _add(fails, warns, f"周正镜头 type 非法：{t or '空'}", True, enforce)
+        else:
+            types.add(t)
+        gno, sno = item.get("group"), item.get("shot")
+        if gno is None or sno is None:
+            _add(fails, warns, f"周正镜头缺 group/shot：{item}", True, enforce)
+            continue
+        scene, _group, shot = _find_shot(plan, gno, sno)
+        if shot is None:
+            _add(fails, warns, f"周正镜头引用不存在的镜头 分镜{gno} 镜头{sno}", True, enforce)
+            continue
+        if not item.get("purpose"):
+            _add(fails, warns, f"周正镜头 分镜{gno}镜头{sno} 缺 purpose", True, enforce)
+        idx = next((i for i, rec in enumerate(records, 1) if rec[2] is shot), None)
+        if idx is not None and idx == prev_idx + 1:
+            _add(fails, warns, "周正镜头不应连续堆叠", False, enforce)
+        if idx is not None:
+            prev_idx = idx
+        sname = (scene or {}).get("scene") or ""
+        per_scene[sname] = per_scene.get(sname, 0) + 1
+        if per_scene[sname] > max_per_scene:
+            _add(fails, warns, f"场次 {sname} 周正镜头超过 {max_per_scene} 个", False, enforce)
+    if len(marks) >= 2 and len(types) < 2:
+        _add(fails, warns, "周正镜头类型少于 2 种（建议纯正/纯侧/对称至少两种）", False, enforce)
+
+
+def _check_mark_refs(plan, key, cfg, enforce, fails, warns, kind, max_empty=None):
     max_count = 0
     if isinstance(cfg, (list, tuple)) and len(cfg) >= 2:
         max_count = int(cfg[1])
@@ -359,6 +417,7 @@ def _check_mark_refs(plan, key, cfg, enforce, fails, warns, kind):
     if len(marks) < int(cfg[0]) or len(marks) > max_count:
         _add(fails, warns, f"{kind} 数量 {len(marks)} 不在 {cfg}", True, enforce)
     records = list(iter_plan_shots(plan))
+    empty_count = 0
     for item in marks:
         if not isinstance(item, dict):
             _add(fails, warns, f"{kind} 标记不是对象", True, enforce)
@@ -374,6 +433,11 @@ def _check_mark_refs(plan, key, cfg, enforce, fails, warns, kind):
         idx = next((i for i, rec in enumerate(records) if rec[2] is shot), None)
         dur = _shot_duration(shot)
         if kind == "意象镜":
+            ikind = str(item.get("kind") or "object")
+            if ikind not in IMAGE_KINDS:
+                _add(fails, warns, f"意象镜 分镜{gno}镜头{sno} kind 非法：{ikind}", True, enforce)
+            if ikind == "empty":
+                empty_count += 1
             if dur < 1.5 - 0.06 or dur > 3.0 + 0.06:
                 _add(fails, warns, f"意象镜 分镜{gno}镜头{sno} 时长 {round(dur, 2)}s 不在 1.5–3.0s", True, enforce)
             if shot.get("dialogue"):
@@ -403,6 +467,8 @@ def _check_mark_refs(plan, key, cfg, enforce, fails, warns, kind):
                     break
             if not boundary:
                 _add(fails, warns, f"过渡镜 分镜{gno}镜头{sno} 不在场界", True, enforce)
+    if kind == "意象镜" and max_empty is not None and empty_count > int(max_empty):
+        _add(fails, warns, f"纯空景意象镜 {empty_count} 个 > 上限 {max_empty}", True, enforce)
 
 
 def _check_gaze(plan, profile, enforce, fails, warns):
@@ -500,7 +566,9 @@ def check_plan(plan, shot_profile=None, root=None):
         _add(fails, warns, f"主角本人屏幕时间占比 {stats['protagonist_duration_share']:.3f} < 0.30", False, enforce)
 
     _check_landing(plan, directing, enforce, fails, warns)
-    _check_mark_refs(plan, "image", directing.get("image_shots_per_ep"), enforce, fails, warns, "意象镜")
+    _check_formal(plan, directing, enforce, fails, warns)
+    _check_mark_refs(plan, "image", directing.get("image_shots_per_ep"), enforce, fails, warns, "意象镜",
+                     directing.get("image_max_empty", 1))
     _check_mark_refs(plan, "transition", directing.get("transitions_per_ep"), enforce, fails, warns, "过渡镜")
     _check_gaze(plan, profile, enforce, fails, warns)
     return fails, warns, stats
@@ -558,4 +626,6 @@ def summary(stats):
         return ""
     return (f"P{stats.get('p')}/R{stats.get('r')}/N{stats.get('n')} "
             f"related={stats.get('related_ratio')} p={stats.get('protagonist_ratio')} "
-            f"n={stats.get('n_ratio')} nrun={stats.get('max_n_run')}")
+            f"n={stats.get('n_ratio')} nrun={stats.get('max_n_run')} "
+            f"F{stats.get('formal_count', 0)} I{stats.get('image_count', 0)} "
+            f"T{stats.get('transition_count', 0)}")

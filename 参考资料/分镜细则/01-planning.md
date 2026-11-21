@@ -32,6 +32,9 @@
     ],
     "gaze_beats": [
       {"group": 1, "shot": 1, "type": "micro_emotion", "note": "她听到名字时指尖停住"}
+    ],
+    "formal": [
+      {"group": 1, "shot": 1, "type": "front", "purpose": "建立主角与空间"}
     ]
   },
   "scenes": [
@@ -110,9 +113,9 @@
 2. **先排 P**：首次揭示、决定、动作结果、情绪落点优先给主角本人。
 3. **再排 R**：配角互动段必须通过 POV/过肩/前景/框内观察/手部物件/VO/OS/反应切/因果回切/声音桥锚定主角。
 4. **最后排 N**：环境、奇观、纯配角段；连续 N ≤2，连续配角互动 N ≤2。
-5. **功能镜预算**：先留场末落点（每场 1 个，重点场 1–2 镜）；`shot-profile.json` 开启意象/过渡时再留对应预算。
+5. **功能镜预算**：先留场末落点（每场 1 个，重点场 1–2 镜）；`shot-profile.json` 开启意象/过渡/周正时再留对应预算：意象 2–3 个（纯空景 ≤1）、周正 2–3 个、过渡 1–2 个。
 6. **自检比例**：`(P+R)/total ≥70%`、`P/total ≥35%`、`N/total ≤30%`、有主角在场场次至少 1 个 P/R；不达标先改计划。
-7. **写 marks**：`marks.landing` 必填；`marks.image` / `marks.transition` 按配置决定是否填。
+7. **写 marks**：`marks.landing` 必填；`marks.image` / `marks.transition` / `marks.formal` 按配置决定是否填。
 8. **写 gaze_beats**：`gaze.active=female` 时必填；每集至少 3 类、至少 1 个 `object`、1 个 `aftermath`；`group`/`shot` 必须指向真实镜头。
 
 ## 三、密度目标
@@ -129,6 +132,8 @@
 - 有主角在场的场次至少 1 个 P/R；连续 N ≤2；连续配角互动 N ≤2。
 - 每个场景必须有 `marks.landing`；场末最后一镜 ≥2.5 秒（重点场收束 4–6 秒）；组末最后一镜 ≥2.0 秒。
 - `image`/`transition` 只在 `directing.image_shots_per_ep` / `directing.transitions_per_ep` 开启时规划；未开启时不要加。
+- `formal` 只在 `directing.formal_shots_per_ep` 开启时规划：每集 2–3 个，类型 `front/profile/symmetrical/eye_level`，同场 ≤2、不得连续。
+- 开启意象时每集 2–3 个；`kind` 为 `object/borrowed/empty`，纯空景最多 1 个，至少 1 个 `object/borrowed`。
 - `gaze.active != neutral` 时，`marks.gaze_beats` 必填：至少 3 类、至少 1 个 `object`、1 个 `aftermath`；类型只用 `agency/micro_emotion/object/distance/aftermath/non_objectifying`。
 - P/R/N 与 marks 只写在 plan JSON，不写进成品正文。
 

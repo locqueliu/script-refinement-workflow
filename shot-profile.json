@@ -26,13 +26,19 @@
   "directing": {
     "enabled": true,
     "image_shots_per_ep": [
-      1,
-      2
+      2,
+      3
     ],
+    "image_max_empty": 1,
     "transitions_per_ep": [
       1,
       2
     ],
+    "formal_shots_per_ep": [
+      2,
+      3
+    ],
+    "formal_max_per_scene": 2,
     "transition_jump_score_min": 3,
     "landing": {
       "enabled": true,
